@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -59,13 +58,14 @@ func main() {
 	//http server for API
 	r := gin.Default()
 
+	//woprk in progress, example api
     r.GET("/api/ping", func(c *gin.Context) {
         c.JSON(200, gin.H{
             "message": "pong",
         })
     })
 
-
+	//API to get the list of hosts, useful for the frontend
     r.GET("/api/hosts", func(c *gin.Context) {
         hosts, _ := LoadHosts()
 		if err != nil {
@@ -105,55 +105,10 @@ func main() {
         }
 
         err = RemoteShutdown(target)
-        
-        // Gestione speciale per l'EOF: se il server si spegne bruscamente, è successo!
-        if err != nil && !strings.Contains(err.Error(), "EOF") {
-            c.JSON(500, gin.H{"error": "Fallimento spegnimento: " + err.Error()})
-            return
-        }
 
-        c.JSON(200, gin.H{"message": "Comando di spegnimento ricevuto da " + target.Name})
+        c.JSON(200, gin.H{"message": "Shutdown command received from " + target.Name})
     })
 
     r.Run(":8080") 
-	//
-
-	var targetID = "server-proxmox" // Questo valore sarà dinamico con le API
-	var action string =""
-	//wol or shutdown, only for test env
-
-	hosts, _ := LoadHosts()
-	var target *Host
-	
-	//checks if target exists in the hosts list, if not it exits with an error
-	for i := range hosts {
-		if hosts[i].ID == targetID {
-			target = &hosts[i]
-			break
-		}
-	}
-	if target == nil {
-		log.Fatalf("Host %s not found", targetID)
-	}
-
-	
-	switch action {
-	case "wol":
-		err = SendWol(target)
-
-	case "shutdown":
-		err = RemoteShutdown(target)
-		
-	default:
-		err = fmt.Errorf("Invalid action: %s", action)
-	}
-
-	//checks errors and prints the result of the action
-	if err != nil {
-		fmt.Printf("Error during %s: %v\n", action, err)
-		log.Printf("Error during %s: %v\n", action, err)
-	} else {
-		fmt.Printf("%s completed successfully for %s!\n", action, target.Name)
-		log.Printf("%s completed successfully for %s!\n", action, target.Name)
-	}
+	log.Fatal(err)
 }
