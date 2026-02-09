@@ -8,15 +8,15 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func RemoteShutdown() error {
+func RemoteShutdown(h *Host) error {
 	var authMethods []ssh.AuthMethod
 
 
-	ip := os.Getenv("TARGET_IP")
-    user := os.Getenv("SSH_USER")
-    password := os.Getenv("SSH_PASS")
-    keyPath := os.Getenv("SSH_KEY_PATH")
-	command := os.Getenv("SSH_SHUTDOWN_COMMAND")
+	ip := h.IP
+    user := h.User
+    password := h.Password
+    keyPath := h.KeyPath
+	command := h.Cmd
 
 	//default shutdown command if not provided
     if command == "" {

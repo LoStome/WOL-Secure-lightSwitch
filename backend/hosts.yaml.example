@@ -1,0 +1,21 @@
+# list of hosts to send WoL packets to, along with their shutdown commands and credentials for SSH (if needed)
+- id: server-proxmox
+  name: "Proxmox Node 1"
+  mac: "04:92:26:D5:69:58"
+  ip: "192.168.1.80"
+  user: "switchbot"
+  password: "la_tua_password_segreta"
+  key_path: "/root/.ssh/id_rsa" #leave empty if not using key-based auth
+  cmd: "sudo -n /usr/sbin/poweroff"
+  skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] #case sensitive, relative to where the WOL server is located, not the client
+
+
+- id: pc-gaming
+  name: "PC Gaming"
+  mac: "AA:BB:CC:DD:EE:FF"
+  ip: "192.168.1.100"
+  user: "root"
+  password: "la_tua_password_segreta"
+  key_path: "/root/.ssh/id_rsa" #leave empty if not using key-based auth
+  cmd: "/usr/sbin/poweroff"
+  skip_interfaces: ["docker", "veth", "br-"]

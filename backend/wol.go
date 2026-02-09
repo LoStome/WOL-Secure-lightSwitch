@@ -5,15 +5,13 @@ package main
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 )
 
 
-func getBroadcastAddr() (string, error) {
+func getBroadcastAddr(skipList []string) (string, error) {
 
-	skipList := strings.Split(os.Getenv("SKIP_INTERFACES"), ",")
-
+    
 	//calculates the broadcast address for the current network (mask, interface, etc) and returns it as a string with the port 9 (the default WoL port)
     interfaces, _ := net.Interfaces()
     for _, iface := range interfaces {
@@ -60,7 +58,8 @@ func getBroadcastAddr() (string, error) {
     return "", fmt.Errorf("no interface with valid IPv4 address found")
 }
 
-func SendWol(macString string) error{
+func SendWol(h *Host) error{
+    macString := h.MAC
 
 	fmt.Printf("Sending WoL packet to %s...\n", macString)
 
@@ -81,7 +80,7 @@ func SendWol(macString string) error{
 	//
 
 	//send packet
-	broadcastStr, err := getBroadcastAddr()
+	broadcastStr, err := getBroadcastAddr(h.SkipInterfaces)
     if err != nil {
         return err
     }
