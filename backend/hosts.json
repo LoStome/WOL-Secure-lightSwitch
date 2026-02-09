@@ -1,0 +1,18 @@
+[
+  {
+    "id": "pc-gaming",
+    "name": "PC Gaming",
+    "mac": "04:92:26:D5:69:58",
+    "ip": "192.168.1.80",
+    "user": "switchbot",
+    "cmd": "sudo /usr/sbin/poweroff"
+  },
+  {
+    "id": "server-proxmox",
+    "name": "Proxmox Node 1",
+    "mac": "AA:BB:CC:DD:EE:FF",
+    "ip": "192.168.1.100",
+    "user": "root",
+    "cmd": "shutdown /s /t 0"
+  }
+]

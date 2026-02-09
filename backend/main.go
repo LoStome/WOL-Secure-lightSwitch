@@ -31,4 +31,13 @@ func main() {
 	} else {
 		fmt.Println("Test completato con successo!")
 	}
+
+	err = RemoteShutdown(
+	)
+	if err != nil {
+		fmt.Printf("Errore durante lo spegnimento remoto: %v\n", err)
+	} else {
+		fmt.Println("Comando inviato con successo!")
+	}
+
 }
