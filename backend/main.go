@@ -3,8 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"strings"
 
+	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
 
@@ -13,11 +16,11 @@ type Host struct {
 	Name string `yaml:"name"`
 	MAC  string `yaml:"mac"`
 	IP   string `yaml:"ip"`
-	User string `yaml:"user"`
-	Password       string   `yaml:"password"`
-    KeyPath        string   `yaml:"key_path"`
-	Cmd  string `yaml:"cmd"`
-	SkipInterfaces []string `yaml:"skip_interfaces"`
+	User           string   `yaml:"user" json:"-"`
+	Password       string   `yaml:"password" json:"-"`
+	KeyPath        string   `yaml:"key_path" json:"-"`
+	Cmd            string   `yaml:"cmd" json:"-"`      
+	SkipInterfaces []string `yaml:"skip_interfaces" json:"-"` 
 }
 
 //load hosts from yaml file, this is where you add new hosts to manage, along with their credentials and shutdown commands
@@ -36,13 +39,87 @@ func LoadHosts() ([]Host, error) {
 	return hosts, nil
 }
 
+func findHost(id string) (*Host, error) {
+    hosts, err := LoadHosts()
+    if err != nil {
+        return nil, err
+    }
+    for i := range hosts {
+        if hosts[i].ID == id {
+            return &hosts[i], nil
+        }
+    }
+    return nil, fmt.Errorf("host %s not found", id)
+}
 
 
 func main() {
 	fmt.Println("Main Starting...")
+	var err error = nil
+	//http server for API
+	r := gin.Default()
+
+    r.GET("/api/ping", func(c *gin.Context) {
+        c.JSON(200, gin.H{
+            "message": "pong",
+        })
+    })
+
+
+    r.GET("/api/hosts", func(c *gin.Context) {
+        hosts, _ := LoadHosts()
+		if err != nil {
+			// Se c'è un errore, rispondiamo con un codice 500
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Errore nel caricamento host"})
+			return
+		}
+        c.JSON(http.StatusOK, hosts)
+    })
+
+	//API Wake-on-LAN
+    r.POST("/api/wol/:id", func(c *gin.Context) {
+        id := c.Param("id")
+        
+        target, err := findHost(id)
+        if err != nil {
+            c.JSON(404, gin.H{"error": err.Error()})
+            return
+        }
+
+        if err := SendWol(target); err != nil {
+            c.JSON(500, gin.H{"error": "WoL Failed: " + err.Error()})
+            return
+        }
+
+        c.JSON(200, gin.H{"message": "Magic Packet sent successfully to " + target.Name})
+    })
+
+	//API Shutdown
+    r.POST("/api/shutdown/:id", func(c *gin.Context) {
+        id := c.Param("id")
+        
+        target, err := findHost(id)
+        if err != nil {
+            c.JSON(404, gin.H{"error": err.Error()})
+            return
+        }
+
+        err = RemoteShutdown(target)
+        
+        // Gestione speciale per l'EOF: se il server si spegne bruscamente, è successo!
+        if err != nil && !strings.Contains(err.Error(), "EOF") {
+            c.JSON(500, gin.H{"error": "Fallimento spegnimento: " + err.Error()})
+            return
+        }
+
+        c.JSON(200, gin.H{"message": "Comando di spegnimento ricevuto da " + target.Name})
+    })
+
+    r.Run(":8080") 
+	//
 
 	var targetID = "server-proxmox" // Questo valore sarà dinamico con le API
-	var action string ="shutdown"
+	var action string =""
 	//wol or shutdown, only for test env
 
 	hosts, _ := LoadHosts()
@@ -59,7 +136,7 @@ func main() {
 		log.Fatalf("Host %s not found", targetID)
 	}
 
-	var err error = nil
+	
 	switch action {
 	case "wol":
 		err = SendWol(target)
