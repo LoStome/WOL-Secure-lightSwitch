@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
@@ -57,6 +58,8 @@ func main() {
 	var err error = nil
 	//http server for API
 	r := gin.Default()
+
+	r.Use(cors.Default())
 
 	//woprk in progress, example api
     r.GET("/api/ping", func(c *gin.Context) {

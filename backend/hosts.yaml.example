@@ -1,22 +1,23 @@
 # list of hosts to send WoL packets to, along with their shutdown commands and credentials for SSH (if needed)
+# only id, name and mac are need for wol, the rest is for shutdown
 - id: server-proxmox
   name: "Proxmox Node 1"
   mac: "AA:BB:CC:DD:EE:FF"
-  ip: "192.168.1.101"
+  ip: "192.168.1.101" #you can also use the hostname if it resolves correctly from the WOL server
   user: "switchbot"
   password: "your_password" #leave empty if not using password-based auth
   key_path: "/root/.ssh/id_rsa" #leave empty if not using key-based auth
   cmd: "sudo -n /usr/sbin/poweroff"
-  skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] #case sensitive, relative the interfaces of the WOL server, not the receiver  host
+  skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] #case sensitive, relative to the interfaces of the WOL server, not the host receiver 
 
 
 #example config for a windows host
 - id: pc-gaming
   name: "PC Gaming"
   mac: "AA:BB:CC:DD:EE:FF"
-  ip: "192.168.1.100"
+  ip: "192.168.1.100" #you can also use the hostname if it resolves correctly from the WOL server
   user: "your_user"
   password: "your_password" #leave empty if not using password-based auth
   key_path: "C:\Users\your_user\.ssh" #leave empty if not using key-based auth
   cmd: "shutdown /s /t 0"
-  skip_interfaces: ["docker", "veth", "br-"] #case sensitive, relative the interfaces of the WOL server, not the receiver  host
+  skip_interfaces: ["docker", "veth", "br-"] #case sensitive, relative to the interfaces of the WOL server, not the host receiver 
