@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  wol-switch:
+    image: lostome/wol_secure_lightswitch:latest
+    container_name: wol_secure_lightswitch
+    restart: unless-stopped
+    network_mode: host # fundamental for wake on lan
+    environment:
+      - PORT=8080 # change this port to your own liking
+    volumes:
+      - ./data:/app/data # Monta l'intera cartella data, all'interno della quale metteremo hosts.yaml

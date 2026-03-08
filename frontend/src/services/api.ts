@@ -5,7 +5,7 @@ export interface Host {
   IP: string;
 }
 
-const API_BASE = "http://localhost:8080/api";
+const API_BASE = "/api";
 
 export const fetchHosts = async (): Promise<Host[]> => {
   const response = await fetch(`${API_BASE}/hosts`);
