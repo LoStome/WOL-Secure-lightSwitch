@@ -22,6 +22,6 @@ go.work
 go.work.sum
 
 #config file with sensitive data, should not be tracked
-host.yaml
+data/hosts.yaml
 
 frontend/node_modules

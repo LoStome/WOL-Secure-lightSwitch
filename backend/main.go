@@ -127,7 +127,7 @@ func main() {
 	// Get port from environment variable, default to 8080 if not set
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "7500"
 	}
 
 	r.Run(":" + port)
