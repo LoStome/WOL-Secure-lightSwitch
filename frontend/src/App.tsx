@@ -53,7 +53,7 @@ function App() {
     <div className="min-h-screen pt-12 pb-24 px-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-900 via-zinc-950 to-black">
       <header className="max-w-7xl mx-auto mb-16 text-center relative">
         {isAuthenticated && (
-          <div className="absolute top-0 right-0 flex gap-2">
+          <div className="flex justify-end gap-2 mb-6 md:mb-0 md:absolute md:top-0 md:right-0">
             {currentUser?.is_admin && !showAdmin && (
               <button 
                 onClick={() => setShowAdmin(true)}
