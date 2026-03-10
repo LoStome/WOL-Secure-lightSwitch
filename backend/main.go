@@ -149,7 +149,12 @@ func main() {
 		for i := range hosts {
 			state := hostStates.Status[hosts[i].ID]
 			hosts[i].Online = state.Online
-			hosts[i].LastPinged = state.LastPinged
+			
+			if state.LastPinged == "" {
+				hosts[i].LastPinged = "N/A"
+			} else {
+				hosts[i].LastPinged = state.LastPinged
+			}
 		}
 		hostStates.RUnlock()
 
@@ -192,7 +197,7 @@ func main() {
 	// Serve static files from the React frontend "dist" folder
 	if _, err := os.Stat("/app/frontend/dist/index.html"); err == nil {
 		r.Static("/assets", "/app/frontend/dist/assets")
-		r.StaticFile("/vite.svg", "/app/frontend/dist/vite.svg")
+		r.StaticFile("/power.svg", "/app/frontend/dist/power.svg")
 		r.LoadHTMLGlob("/app/frontend/dist/index.html")
 
 		// Catch-all route for React Router (if you ever use it) or just to serve the main HTML page

@@ -17,6 +17,10 @@ RUN npm run build
 FROM golang:alpine AS backend-builder
 WORKDIR /app/backend
 
+# Diciamo a Docker che accettiamo argomenti sulla piattaforma target forniti da `buildx`
+ARG TARGETOS
+ARG TARGETARCH
+
 # Anche qui, prima i moduli per la cache
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
@@ -24,16 +28,16 @@ RUN go mod download
 # Copiamo il codice sorgente Go
 COPY backend/ ./
 
-# Compiliamo il programma. 
-# CGO_ENABLED=0 disabilita le librerie in C (perché vogliamo un eseguibile standalone perfetto per alpine).
-# GOOS=linux e GOARCH=arm64 assicurano che il codice sia compatibile con il Raspberry, anche se lo compiliamo dal tuo PC Windows.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o wol-server .
+# Compiliamo il programma tenendo conto dell'architettura scelta al momento del build (amd64 o arm64)
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o wol-server .
 
 
-# Fase 3: L'Immagine Finale (quella che andrà effettivamente sul Raspberry)
-# Usiamo un'immagine super-leggera (Alpine Linux) per risparmiare spazio sulla SD del Raspberry
+# Fase 3: L'Immagine Finale
 FROM alpine:latest
 WORKDIR /app
+
+# Installiamo il pacchetto tzdata per gestire correttamente le timezone, ed eventuali certificati ca
+RUN apk add --no-cache tzdata ca-certificates
 
 # Copiamo l'eseguibile Go dalla 'Fase 2'
 COPY --from=backend-builder /app/backend/wol-server /app/wol-server

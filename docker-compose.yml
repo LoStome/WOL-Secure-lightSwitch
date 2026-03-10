@@ -3,6 +3,7 @@ version: '3.8'
 services:
   wol-switch:
     image: lostome/wol_secure_lightswitch:latest
+    platform: linux/arm64 # or linux/amd64
     container_name: wol_secure_lightswitch
     restart: unless-stopped
     network_mode: host # fundamental for wake on lan
