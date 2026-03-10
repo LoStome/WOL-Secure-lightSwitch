@@ -7,10 +7,45 @@ export interface Host {
   last_pinged: string;
 }
 
+export interface User {
+  id: number;
+  email: string;
+  is_admin: boolean;
+  devices: { id: number, user_id: number, device_id: string }[];
+}
+
 const API_BASE = "/api";
 
+const getHeaders = () => {
+  const token = localStorage.getItem("token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { "Authorization": `Bearer ${token}` } : {})
+  };
+};
+
+export const login = async (email: string, password: string): Promise<{token: string, user: User}> => {
+  const response = await fetch(`${API_BASE}/login`, {
+    method: 'POST',
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
+  if (!response.ok) {
+    throw new Error('Invalid credentials');
+  }
+  return response.json();
+}
+
+export const checkSetup = async (): Promise<{needs_setup: boolean}> => {
+  const response = await fetch(`${API_BASE}/setup`);
+  if (!response.ok) {
+    throw new Error('Failed to check setup status');
+  }
+  return response.json();
+}
+
 export const fetchHosts = async (): Promise<Host[]> => {
-  const response = await fetch(`${API_BASE}/hosts`);
+  const response = await fetch(`${API_BASE}/hosts`, { headers: getHeaders() });
   if (!response.ok) {
     throw new Error('Failed to fetch hosts');
   }
@@ -18,15 +53,44 @@ export const fetchHosts = async (): Promise<Host[]> => {
 };
 
 export const wakeHost = async (id: string): Promise<void> => {
-  const response = await fetch(`${API_BASE}/wol/${id}`, { method: 'POST' });
+  const response = await fetch(`${API_BASE}/wol/${id}`, { method: 'POST', headers: getHeaders() });
   if (!response.ok) {
     throw new Error('Failed to wake host');
   }
 };
 
 export const shutdownHost = async (id: string): Promise<void> => {
-  const response = await fetch(`${API_BASE}/shutdown/${id}`, { method: 'POST' });
+  const response = await fetch(`${API_BASE}/shutdown/${id}`, { method: 'POST', headers: getHeaders() });
   if (!response.ok) {
     throw new Error('Failed to shutdown host');
   }
 };
+
+export const fetchUsers = async (): Promise<User[]> => {
+  const response = await fetch(`${API_BASE}/users`, { headers: getHeaders() });
+  if (!response.ok) {
+    throw new Error('Failed to fetch users');
+  }
+  return response.json();
+}
+
+export const createUser = async (email: string, password: string, isAdmin: boolean, devices: string[]): Promise<void> => {
+  const response = await fetch(`${API_BASE}/users`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ email, password, is_admin: isAdmin, devices })
+  });
+  if (!response.ok) {
+    throw new Error('Failed to create user');
+  }
+}
+
+export const deleteUser = async (id: number): Promise<void> => {
+  const response = await fetch(`${API_BASE}/users/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders()
+  });
+  if (!response.ok) {
+    throw new Error('Failed to delete user');
+  }
+}
