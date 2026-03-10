@@ -1,10 +1,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,7 +54,8 @@ func LoadHosts() ([]Host, error) {
 			return nil, err
 		}
 	}
-	fmt.Printf("Successfully read %s file.\n", path)
+	// Uncomment for debug
+	// fmt.Printf("Successfully read %s file.\n", path)
 
 	var hosts []Host
 	err = yaml.Unmarshal(data, &hosts)
@@ -107,7 +111,6 @@ func StartPingManager() {
 					}
 					hostStates.Status[host.ID] = state
 					hostStates.Unlock()
-					// fmt.Printf("PingManager: %s is online: %t\n", host.Name, online)
 				}(h)
 			}
 		}
@@ -116,83 +119,296 @@ func StartPingManager() {
 	}
 }
 
+// ----------------- API Handlers -----------------
+
+type LoginRequest struct {
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+func handleLogin(c *gin.Context) {
+	var req LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := GetUserByEmail(req.Email)
+	if err != nil {
+		// If user not found, check if there are any admins. If not, auto-create this user as the first admin.
+		hasAdmins, dbErr := HasAdmins()
+		if dbErr == nil && !hasAdmins {
+			hash, hashErr := HashPassword(req.Password)
+			if hashErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+				return
+			}
+			err = CreateUser(req.Email, hash, true, []string{})
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create initial admin user"})
+				return
+			}
+			// Fetch the newly created user
+			user, err = GetUserByEmail(req.Email)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve new admin user"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+			return
+		}
+	} else if !CheckPasswordHash(req.Password, user.PasswordHash) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+		return
+	}
+
+	token, err := GenerateJWT(user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"token": token,
+		"user": gin.H{
+			"id":       user.ID,
+			"email":    user.Email,
+			"is_admin": user.IsAdmin,
+		},
+	})
+}
+
+// Check if user is authorized for a specific device based on UserDevice mapping
+func isAuthorizedForDevice(userID uint, deviceID string, isAdmin bool) bool {
+	if isAdmin {
+		return true
+	}
+	user, err := GetUserByID(userID)
+	if err != nil {
+		return false
+	}
+	for _, dev := range user.Devices {
+		if dev.DeviceID == deviceID {
+			return true
+		}
+	}
+	return false
+}
+
+func handleGetHosts(c *gin.Context) {
+	hosts, err := LoadHosts()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error loading hosts"})
+		return
+	}
+
+	userID := c.GetUint("userID")
+	isAdmin := c.GetBool("isAdmin")
+
+	// Filter hosts based on authorization
+	var authorizedHosts []Host
+	for i := range hosts {
+		if isAuthorizedForDevice(userID, hosts[i].ID, isAdmin) {
+			// Attach online state to hosts from cache
+			hostStates.RLock()
+			state := hostStates.Status[hosts[i].ID]
+			hosts[i].Online = state.Online
+			if state.LastPinged == "" {
+				hosts[i].LastPinged = "N/A"
+			} else {
+				hosts[i].LastPinged = state.LastPinged
+			}
+			hostStates.RUnlock()
+			
+			authorizedHosts = append(authorizedHosts, hosts[i])
+		}
+	}
+
+	c.JSON(http.StatusOK, authorizedHosts)
+}
+
+func handleWOL(c *gin.Context) {
+	id := c.Param("id")
+	userID := c.GetUint("userID")
+	isAdmin := c.GetBool("isAdmin")
+
+	if !isAuthorizedForDevice(userID, id, isAdmin) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Not authorized to access this device"})
+		return
+	}
+
+	target, err := findHost(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": strings.ReplaceAll(err.Error(), "\"", "'")})
+		return
+	}
+
+	if err := SendWol(target); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "WoL Failed: " + strings.ReplaceAll(err.Error(), "\"", "'")})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Magic Packet sent successfully to " + target.Name})
+}
+
+func handleShutdown(c *gin.Context) {
+	id := c.Param("id")
+	userID := c.GetUint("userID")
+	isAdmin := c.GetBool("isAdmin")
+
+	if !isAuthorizedForDevice(userID, id, isAdmin) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Not authorized to access this device"})
+		return
+	}
+
+	target, err := findHost(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": strings.ReplaceAll(err.Error(), "\"", "'")})
+		return
+	}
+
+	err = RemoteShutdown(target)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Shutdown command received from " + target.Name})
+}
+
+// ---- Admin API ----
+
+func handleGetUsers(c *gin.Context) {
+	var users []User
+	// Preload the devices for the users so the admin can see them
+	if err := DB.Preload("Devices").Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
+		return
+	}
+
+	// We don't want to return password hashes, so we clear them manually or map to a DTO
+	// However, json:"-" on PasswordHash already hides it.
+	c.JSON(http.StatusOK, users)
+}
+
+type CreateUserRequest struct {
+	Email    string   `json:"email" binding:"required"`
+	Password string   `json:"password" binding:"required"`
+	IsAdmin  bool     `json:"is_admin"`
+	Devices  []string `json:"devices"`
+}
+
+func handleCreateUser(c *gin.Context) {
+	var req CreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hash, err := HashPassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
+	err = CreateUser(req.Email, hash, req.IsAdmin, req.Devices)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully"})
+}
+
+func handleDeleteUser(c *gin.Context) {
+	id := c.Param("id")
+	userID, err := strconv.Atoi(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	// Prevent self-deletion if needed, but for simplicity we'll just delete
+	if err := DB.Delete(&User{}, userID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+}
+
+func handleCheckSetup(c *gin.Context) {
+	hasAdmins, err := HasAdmins()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check setup status"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"needs_setup": !hasAdmins})
+}
+
+
 func main() {
 	fmt.Println("Main Starting...")
-	
+
+	// Parse CLI flags
+	addUserEmail := flag.String("adduser", "", "Email of the user to add")
+	addUserPass := flag.String("password", "", "Password for the new user")
+	addUserAdmin := flag.Bool("admin", false, "Make the new user an admin")
+	addUserDevices := flag.String("devices", "", "Comma-separated list of allowed device IDs")
+	flag.Parse()
+
+	// Initialize Database
+	InitDB()
+
+	// Handle CLI user creation
+	if *addUserEmail != "" {
+		if *addUserPass == "" {
+			log.Fatal("Password is required when adding a user")
+		}
+		hash, err := HashPassword(*addUserPass)
+		if err != nil {
+			log.Fatalf("Error hashing password: %v", err)
+		}
+		devices := []string{}
+		if *addUserDevices != "" {
+			devices = strings.Split(*addUserDevices, ",")
+		}
+		err = CreateUser(*addUserEmail, hash, *addUserAdmin, devices)
+		if err != nil {
+			log.Fatalf("Error creating user: %v", err)
+		}
+		fmt.Printf("User %s created successfully.\n", *addUserEmail)
+		os.Exit(0)
+	}
+
 	// Start the ping manager in the background
 	go StartPingManager()
-	
+
 	var err error = nil
 	//http server for API
 	r := gin.Default()
 
 	r.Use(cors.Default())
 
-	//woprk in progress, example api
-	r.GET("/api/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong",
-		})
+	// Public Routes
+	r.POST("/api/login", handleLogin)
+	r.GET("/api/setup", handleCheckSetup)
+
+	// Protected Routes
+	protected := r.Group("/api")
+	protected.Use(AuthMiddleware())
+	
+	protected.GET("/ping", func(c *gin.Context) {
+		c.JSON(200, gin.H{"message": "pong"})
 	})
 
-	//API to get the list of hosts, useful for the frontend
-	r.GET("/api/hosts", func(c *gin.Context) {
-		hosts, err := LoadHosts()
-		if err != nil {
-			// Se c'è un errore, rispondiamo con un codice 500
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Errore nel caricamento host"})
-			return
-		}
-
-		// Attach online state to hosts from cache
-		hostStates.RLock()
-		for i := range hosts {
-			state := hostStates.Status[hosts[i].ID]
-			hosts[i].Online = state.Online
-			
-			if state.LastPinged == "" {
-				hosts[i].LastPinged = "N/A"
-			} else {
-				hosts[i].LastPinged = state.LastPinged
-			}
-		}
-		hostStates.RUnlock()
-
-		c.JSON(http.StatusOK, hosts)
-	})
-
-	//API Wake-on-LAN
-	r.POST("/api/wol/:id", func(c *gin.Context) {
-		id := c.Param("id")
-
-		target, err := findHost(id)
-		if err != nil {
-			c.JSON(404, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := SendWol(target); err != nil {
-			c.JSON(500, gin.H{"error": "WoL Failed: " + err.Error()})
-			return
-		}
-
-		c.JSON(200, gin.H{"message": "Magic Packet sent successfully to " + target.Name})
-	})
-
-	//API Shutdown
-	r.POST("/api/shutdown/:id", func(c *gin.Context) {
-		id := c.Param("id")
-
-		target, err := findHost(id)
-		if err != nil {
-			c.JSON(404, gin.H{"error": err.Error()})
-			return
-		}
-
-		err = RemoteShutdown(target)
-
-		c.JSON(200, gin.H{"message": "Shutdown command received from " + target.Name})
-	})
+	protected.GET("/hosts", handleGetHosts)
+	protected.POST("/wol/:id", handleWOL)
+	protected.POST("/shutdown/:id", handleShutdown)
+	
+	// Admin Routes
+	adminGroup := protected.Group("/users")
+	adminGroup.Use(AdminMiddleware())
+	adminGroup.GET("", handleGetUsers)
+	adminGroup.POST("", handleCreateUser)
+	adminGroup.DELETE("/:id", handleDeleteUser)
 
 	// Serve static files from the React frontend "dist" folder
 	if _, err := os.Stat("/app/frontend/dist/index.html"); err == nil {
