@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     network_mode: host # fundamental for wake on lan
     environment:
-      - PORT=7500 # change this port to your own liking, if there is no port set, it will default to 7500
+      - PORT=7500 # change this port to your own liking
+      - TZ=Europe/Rome # change this to your desired timezone
     volumes:
       - ./data:/app/data # here you have to put your hosts.yaml. Follow the example in hosts.yaml.example
