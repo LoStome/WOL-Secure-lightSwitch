@@ -3,6 +3,8 @@ export interface Host {
   Name: string;
   MAC: string;
   IP: string;
+  online: boolean;
+  last_pinged: string;
 }
 
 const API_BASE = "/api";

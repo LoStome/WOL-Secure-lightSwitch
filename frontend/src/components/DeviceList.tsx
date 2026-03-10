@@ -10,6 +10,8 @@ const DeviceList: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval>;
+
     const loadHosts = async () => {
       try {
         const data = await fetchHosts();
@@ -22,6 +24,13 @@ const DeviceList: React.FC = () => {
     };
 
     loadHosts();
+    
+    // Poll every 10 seconds
+    intervalId = setInterval(loadHosts, 10000);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
   }, []);
 
   if (loading) {
