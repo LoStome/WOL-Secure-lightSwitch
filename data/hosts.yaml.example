@@ -8,6 +8,7 @@
   password: "your_password" #leave empty if not using password-based auth
   key_path: "/root/.ssh/id_rsa" #leave empty if not using key-based auth
   cmd: "sudo -n /usr/sbin/poweroff"
+  ping_interval: 15
   skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
 
 
@@ -20,6 +21,7 @@
   password: "your_password" #leave empty if not using password-based auth
   key_path: "C:\Users\your_user\.ssh" #leave empty if not using key-based auth
   cmd: "shutdown /s /t 0"
+    ping_interval: 30
   skip_interfaces: ["docker", "veth", "br-"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
 
 #you can continue to add devices infinetly
