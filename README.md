@@ -40,7 +40,9 @@ services:
       - TZ=Europe/Rome # Change this to your desired timezone
     volumes:
       - ./data:/app/data # This is where your hosts.yaml and database will live
+      - /home/user/.ssh:/app/data/.ssh:ro # this is needed for key-based auth if you want to use it
 ```
+*Note for SSH Keys: you could also just copy the keys into a data/ssh folder and not reference them in the hosts.yaml file. This is not recommended for security reasons.*
 
 ### 3. Define Your Devices
 In the same directory as your `docker-compose.yml`, create a `data` folder and inside it, create a `hosts.yaml` file based on this structure (see also [data/hosts.yaml.example](https://github.com/LoStome/WOL-Secure-lightSwitch/blob/main/data/hosts.yaml.example)):
@@ -53,7 +55,7 @@ In the same directory as your `docker-compose.yml`, create a `data` folder and i
   ip: "192.168.1.101" 
   user: "switchbot"
   password: "your_password" # Leave empty if not using password-based auth
-  key_path: "/app/data/id_rsa" # Leave empty if not using key-based auth. Must map to a path inside the container!
+  key_path: "/app/data/.ssh/id_rsa" # Leave empty if not using key-based auth. Must map to a path inside the container!
   cmd: "sudo -n /usr/sbin/poweroff"
   ping_interval: 15
   skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"]
@@ -64,12 +66,56 @@ In the same directory as your `docker-compose.yml`, create a `data` folder and i
   ip: "192.168.1.100"
   user: "windows_user"
   password: "windows_password" 
-  key_path: "" 
+  key_path: "/app/data/.ssh/id_ed25519"
   cmd: "shutdown /s /t 0"
   ping_interval: 30
   skip_interfaces: ["docker", "veth", "br-"]
 ```
-*Note for SSH Keys: If you use SSH keys, ensure the private key is placed inside your `./data/` folder so it's mounted inside the container at `/app/data/`, and reference that path in `key_path`. Alternatively, you can map any external SSH key path as a volume to `/app/data/` in your `docker-compose.yml`.*
+
+## 🔐 Remote Shutdown Setup (Proxmox/Linux)
+
+To allow SecureSwitch to shut down your Proxmox node or any Linux machine, you need to configure the target system to allow the `poweroff` command without manual password entry.
+
+### 1. Create a Dedicated User (Recommended)
+For better security, it is best to use a dedicated user (e.g., `switchbot`) instead of `root`. Run these commands on your Proxmox/Linux shell:
+
+```bash
+# Create the user
+sudo adduser switchbot
+
+# Add the user to the sudo group
+sudo usermod -aG sudo switchbot
+```
+
+### 2. Enable Passwordless Shutdown
+By default, sudo asks for a password. Since SecureSwitch runs automatically, you must create an exception for the shutdown command.
+
+Create a specific sudoers file:
+
+```bash
+sudo nano /etc/sudoers.d/switchbot
+```
+
+Paste the following line (replace switchbot with your chosen username):
+
+```plaintext
+switchbot ALL=(ALL) NOPASSWD: /usr/sbin/poweroff, /usr/sbin/shutdown
+```
+
+Save and exit (Ctrl+O, Enter, Ctrl+X).
+
+### 3. Verify Your hosts.yaml Configuration
+Ensure your hosts.yaml matches the setup. Use the `-n` (non-interactive) flag in the command to prevent the application from hanging if permissions are misconfigured:
+
+```yaml
+- id: server-proxmox
+  name: "Proxmox Node"
+  ip: "192.168.1.101"
+  user: "switchbot"
+  password: "your_password" # or use key_path
+  cmd: "sudo -n /usr/sbin/poweroff"
+```
+
 
 ### 4. Run the Service
 Start the container in the background:
