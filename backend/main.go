@@ -62,6 +62,14 @@ func LoadHosts() ([]Host, error) {
 		return nil, err
 	}
 
+	seenIDs := make(map[string]bool)
+	for _, h := range hosts {
+		if seenIDs[h.ID] {
+			fmt.Printf("WARNING: Duplicate host ID detected in hosts.yaml: '%s'. This will cause routing and ping issues!\n", h.ID)
+		}
+		seenIDs[h.ID] = true
+	}
+
 	return hosts, nil
 }
 

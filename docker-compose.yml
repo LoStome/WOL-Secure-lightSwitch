@@ -12,3 +12,4 @@ services:
       - TZ=Europe/Rome # change this to your desired timezone
     volumes:
       - ./data:/app/data # here you have to put your hosts.yaml. Follow the example in hosts.yaml.example
+      - /home/user/.ssh:/app/data/.ssh:ro # this is needed for key-based auth if you want to use it

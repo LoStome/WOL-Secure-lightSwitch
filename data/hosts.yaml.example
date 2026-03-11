@@ -4,9 +4,9 @@
   name: "Proxmox Node 1"
   mac: "AA:BB:CC:DD:EE:FF"
   ip: "192.168.1.101" #you can also use the hostname if it resolves correctly from the WOL app server
-  user: "switchbot"
+  user: "switchbot" # you could create a use specifically for the app, with limited sudo rights
   password: "your_password" #leave empty if not using password-based auth
-  key_path: "/root/.ssh/id_rsa" #leave empty if not using key-based auth
+  key_path: "" #leave empty if not using key-based auth
   cmd: "sudo -n /usr/sbin/poweroff"
   ping_interval: 15
   skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
@@ -19,9 +19,9 @@
   ip: "192.168.1.100" #you can also use the hostname if it resolves correctly from the WOL app server
   user: "your_user"
   password: "your_password" #leave empty if not using password-based auth
-  key_path: "C:\Users\your_user\.ssh" #leave empty if not using key-based auth
+  key_path: "/app/data/.ssh/id_ed25519" #leave empty if not using key-based auth
   cmd: "shutdown /s /t 0"
-    ping_interval: 30
+  ping_interval: 30
   skip_interfaces: ["docker", "veth", "br-"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
 
-#you can continue to add devices infinetly
+# you can continue to add devices indefinitely
