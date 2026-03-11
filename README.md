@@ -72,12 +72,16 @@ In the same directory as your `docker-compose.yml`, create a `data` folder and i
   skip_interfaces: ["docker", "veth", "br-"]
 ```
 
-## 🔐 Remote Shutdown Setup (Proxmox/Linux)
+## 🔐 Remote Shutdown Setup (Linux)
 
-To allow SecureSwitch to shut down your Proxmox node or any Linux machine, you need to configure the target system to allow the `poweroff` command without manual password entry.
+To allow SecureSwitch to shut down your Linux machine, you need to configure the target system to allow the `poweroff` command without manual password entry.
+
+- *Notes:*
+  - *This is needed only if you want to use the shutdown feature.*
+  - *Password and key are used only for logging into your machine, not for the shutdown command.*
 
 ### 1. Create a Dedicated User (Recommended)
-For better security, it is best to use a dedicated user (e.g., `switchbot`) instead of `root`. Run these commands on your Proxmox/Linux shell:
+For better security, it is best to use a dedicated user (e.g., `switchbot`) instead of `root`. Run these commands on your Linux shell:
 
 ```bash
 # Create the user
@@ -112,7 +116,7 @@ Ensure your hosts.yaml matches the setup. Use the `-n` (non-interactive) flag in
   name: "Proxmox Node"
   ip: "192.168.1.101"
   user: "switchbot"
-  password: "your_password" # or use key_path
+  password: "your_password" # or use key_path (password and key are used only for logging in, not for the shutdown command)
   cmd: "sudo -n /usr/sbin/poweroff"
 ```
 
