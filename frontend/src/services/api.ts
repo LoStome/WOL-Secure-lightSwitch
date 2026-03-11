@@ -94,3 +94,14 @@ export const deleteUser = async (id: number): Promise<void> => {
     throw new Error('Failed to delete user');
   }
 }
+
+export const updateUser = async (id: number, data: { password?: string, is_admin?: boolean, devices?: string[] }): Promise<void> => {
+  const response = await fetch(`${API_BASE}/users/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) {
+    throw new Error('Failed to update user');
+  }
+}

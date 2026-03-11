@@ -85,3 +85,69 @@ func CreateUser(email string, passwordHash string, isAdmin bool, deviceIDs []str
 
 	return DB.Create(&user).Error
 }
+
+func GetAdminCount() (int64, error) {
+	var count int64
+	err := DB.Model(&User{}).Where("is_admin = ?", true).Count(&count).Error
+	return count, err
+}
+
+func UpdateUser(userID uint, passwordHash *string, isAdmin *bool, deviceIDs []string) error {
+	var user User
+	// Fetch the user
+	if err := DB.First(&user, userID).Error; err != nil {
+		return err
+	}
+
+	// Prevent demoting the last admin
+	if user.IsAdmin && isAdmin != nil && !*isAdmin {
+		count, err := GetAdminCount()
+		if err != nil {
+			return err
+		}
+		if count <= 1 {
+			return fmt.Errorf("cannot demote the last administrator")
+		}
+	}
+
+	// Update fields if provided
+	if passwordHash != nil && *passwordHash != "" {
+		user.PasswordHash = *passwordHash
+	}
+	if isAdmin != nil {
+		user.IsAdmin = *isAdmin
+	}
+
+	// Begin transaction to ensure data integrity
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	// Save the base user
+	if err := tx.Save(&user).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Delete existing devices for the user
+	if err := tx.Where("user_id = ?", userID).Delete(&UserDevice{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Insert new devices
+	for _, devID := range deviceIDs {
+		newDevice := UserDevice{
+			UserID:   userID,
+			DeviceID: devID,
+		}
+		if err := tx.Create(&newDevice).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	// Commit the transaction
+	return tx.Commit().Error
+}
