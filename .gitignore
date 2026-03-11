@@ -25,3 +25,4 @@ go.work.sum
 data/hosts.yaml
 
 frontend/node_modules
+data/secure-switch.db

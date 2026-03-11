@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { fetchUsers, createUser, deleteUser, fetchHosts } from '../services/api';
+import { fetchUsers, createUser, updateUser, deleteUser, fetchHosts } from '../services/api';
 import type { User, Host } from '../services/api';
-import { Shield, Trash2, Plus, Loader2, User as UserIcon } from 'lucide-react';
+import { Shield, Trash2, Edit2, Plus, Loader2, User as UserIcon, X } from 'lucide-react';
 
 const AdminPanel = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -10,6 +10,7 @@ const AdminPanel = () => {
   const [error, setError] = useState('');
 
   // Form state
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -44,21 +45,46 @@ const AdminPanel = () => {
     );
   };
 
-  const handleCreateUser = async (e: React.FormEvent) => {
+  const resetForm = () => {
+    setEditingUserId(null);
+    setEmail('');
+    setPassword('');
+    setIsAdmin(false);
+    setSelectedDevices([]);
+    setError('');
+  };
+
+  const handleEditClick = (user: User) => {
+    setEditingUserId(user.id);
+    setEmail(user.email);
+    setPassword(''); // Leave blank intentionally
+    setIsAdmin(user.is_admin);
+    setSelectedDevices(user.devices ? user.devices.map(d => d.device_id) : []);
+    
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSubmitUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitLoading(true);
     setError('');
     try {
-      await createUser(email, password, isAdmin, selectedDevices);
-      // Reset form
-      setEmail('');
-      setPassword('');
-      setIsAdmin(false);
-      setSelectedDevices([]);
-      // Reload users
+      if (editingUserId) {
+        // Edit mode
+        const updateData: any = { is_admin: isAdmin, devices: selectedDevices };
+        if (password) {
+          updateData.password = password;
+        }
+        await updateUser(editingUserId, updateData);
+      } else {
+        // Create mode
+        await createUser(email, password, isAdmin, selectedDevices);
+      }
+      resetForm();
       await loadData();
     } catch (err: any) {
-      setError('Failed to create user: ' + err.message);
+      setError(`Failed to ${editingUserId ? 'update' : 'create'} user: ` + err.message);
     } finally {
       setSubmitLoading(false);
     }
@@ -91,14 +117,27 @@ const AdminPanel = () => {
         </div>
       )}
 
-      {/* Create User Form */}
-      <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-2xl">
-        <h2 className="text-xl font-semibold text-zinc-100 flex items-center gap-2 mb-6">
-          <Plus className="w-5 h-5 text-blue-400" />
-          Add New User
-        </h2>
+      {/* User Form */}
+      <div className={`bg-zinc-900/50 backdrop-blur-xl border ${editingUserId ? 'border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.1)]' : 'border-zinc-800'} rounded-3xl p-6 sm:p-8 transition-colors duration-300`}>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className={`text-xl font-semibold flex items-center gap-2 ${editingUserId ? 'text-amber-400' : 'text-zinc-100'}`}>
+            {editingUserId ? (
+              <><Edit2 className="w-5 h-5" /> Edit User: {email}</>
+            ) : (
+              <><Plus className="w-5 h-5 text-blue-400" /> Add New User</>
+            )}
+          </h2>
+          {editingUserId && (
+            <button 
+              onClick={resetForm} 
+              className="text-zinc-400 hover:text-white flex items-center gap-1 text-sm bg-zinc-800/50 hover:bg-zinc-800 px-3 py-1.5 rounded-lg transition-colors border border-zinc-700/50"
+            >
+              <X className="w-4 h-4" /> Cancel Edit
+            </button>
+          )}
+        </div>
 
-        <form onSubmit={handleCreateUser} className="space-y-6">
+        <form onSubmit={handleSubmitUser} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">Email</label>
@@ -107,20 +146,23 @@ const AdminPanel = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                disabled={!!editingUserId} // Don't allow email change for now
+                className={`w-full px-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all ${editingUserId ? 'opacity-50 cursor-not-allowed' : ''}`}
                 placeholder="user@example.com"
               />
             </div>
             
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">Password</label>
+              <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">
+                Password {editingUserId && <span className="normal-case text-amber-500/70 ml-1">(Leave blank to keep current)</span>}
+              </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
+                required={!editingUserId}
                 className="w-full px-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
-                placeholder="••••••••"
+                placeholder={editingUserId ? "•••••••• (unchanged)" : "••••••••"}
               />
             </div>
           </div>
@@ -177,18 +219,18 @@ const AdminPanel = () => {
           <div className="pt-4 flex justify-end">
             <button
               type="submit"
-              disabled={submitLoading || (!email || !password)}
-              className="flex items-center gap-2 py-2 px-6 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={submitLoading || (!email || (!password && !editingUserId))}
+              className={`flex items-center gap-2 py-2 px-6 ${editingUserId ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'} text-white font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed`}
             >
-              {submitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              Create User
+              {submitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingUserId ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />)}
+              {editingUserId ? 'Save Changes' : 'Create User'}
             </button>
           </div>
         </form>
       </div>
 
       {/* Users List */}
-      <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-2xl overflow-hidden">
+      <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6 sm:p-8 overflow-hidden">
         <h2 className="text-xl font-semibold text-zinc-100 flex items-center gap-2 mb-6">
           <UserIcon className="w-5 h-5 text-zinc-400" />
           Manage Users
@@ -232,13 +274,22 @@ const AdminPanel = () => {
                     )}
                   </td>
                   <td className="px-6 sm:px-4 py-4 text-right">
-                    <button
-                      onClick={() => handleDeleteUser(user.id)}
-                      className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors inline-flex"
-                      title="Delete User"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => handleEditClick(user)}
+                        className="p-2 text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors inline-flex"
+                        title="Edit User"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(user.id)}
+                        className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors inline-flex"
+                        title="Delete User"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

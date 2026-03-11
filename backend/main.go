@@ -43,7 +43,6 @@ var hostStates = struct {
 
 // load hosts from yaml file, this is where you add new hosts to manage, along with their credentials and shutdown commands
 func LoadHosts() ([]Host, error) {
-	fmt.Println("Attempting to load hosts from data/hosts.yaml...")
 	path := "data/hosts.yaml"
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -317,12 +316,70 @@ func handleCreateUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully"})
 }
 
+type UpdateUserRequest struct {
+	Password *string  `json:"password"` // optional
+	IsAdmin  *bool    `json:"is_admin"` // optional
+	Devices  []string `json:"devices"`
+}
+
+func handleUpdateUser(c *gin.Context) {
+	id := c.Param("id")
+	userID, err := strconv.Atoi(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	var req UpdateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var hashPtr *string
+	if req.Password != nil && *req.Password != "" {
+		hash, err := HashPassword(*req.Password)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+			return
+		}
+		hashPtr = &hash
+	}
+
+	err = UpdateUser(uint(userID), hashPtr, req.IsAdmin, req.Devices)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User updated successfully"})
+}
+
 func handleDeleteUser(c *gin.Context) {
 	id := c.Param("id")
 	userID, err := strconv.Atoi(id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
+	}
+
+	// Fetch user first to check if they are an admin
+	var user User
+	if err := DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	if user.IsAdmin {
+		count, err := GetAdminCount()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check admin count"})
+			return
+		}
+		if count <= 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot delete the last administrator"})
+			return
+		}
 	}
 
 	// Prevent self-deletion if needed, but for simplicity we'll just delete
@@ -408,6 +465,7 @@ func main() {
 	adminGroup.Use(AdminMiddleware())
 	adminGroup.GET("", handleGetUsers)
 	adminGroup.POST("", handleCreateUser)
+	adminGroup.PUT("/:id", handleUpdateUser)
 	adminGroup.DELETE("/:id", handleDeleteUser)
 
 	// Serve static files from the React frontend "dist" folder
