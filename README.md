@@ -13,11 +13,39 @@ SecureSwitch is a modern, lightweight, and secure web application to manage Wake
 - **First-time Setup:** The system automatically prompts you to create the initial administrative account.
 - **Dockerized:** Simple and clean deployment using Docker Compose.
 
+## 📸 Screenshots
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <b>Admin View</b><br>
+        <img src="assets/readMe/mainPanelAdmin.png" width="600"><br>
+        <i>Main dashboard for administrators, showing all devices</i>
+      </td>
+    </tr>
+    <tr>
+      <td align="center">
+        <b>User View</b><br>
+        <img src="assets/readMe/mainPanelUser.png" width="600"><br>
+        <i>Restricted dashboard for standard users, showing only the selected devices</i>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" colspan="2">
+        <b>Admin Panel</b><br>
+        <img src="assets/readMe/adminPanel.png" width="600"><br>
+        <i>User management interface for admins</i>
+      </td>
+    </tr>
+  </table>
+</div>
+
 ---
 
 ## 🚀 Getting Started (Using Docker)
 
-The easiest way to run SecureSwitch is via Docker. 
+The easiest way to run WOL Secure LightSwitch is via Docker. 
 
 ### 1. Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed on your server.

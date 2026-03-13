@@ -26,3 +26,4 @@ data/hosts.yaml
 
 frontend/node_modules
 data/secure-switch.db
+data/secure-switch.db.bak
