@@ -276,6 +276,11 @@ func handleShutdown(c *gin.Context) {
 	}
 
 	err = RemoteShutdown(target)
+	if err != nil {
+		fmt.Printf("Shutdown failed for %s (%s): %v\n", target.Name, target.IP, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Shutdown failed: " + strings.ReplaceAll(err.Error(), "\"", "'")})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Shutdown command received from " + target.Name})
 }
