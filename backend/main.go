@@ -453,7 +453,14 @@ func main() {
 
 	var err error = nil
 	//http server for API
-	r := gin.Default()
+	r := gin.New()
+	
+	// Togli il warning "You trusted all proxies..." siccome è un tool locale
+	_ = r.SetTrustedProxies(nil)
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: []string{"/api/hosts"},
+	}))
+	r.Use(gin.Recovery())
 
 	r.Use(cors.Default())
 
@@ -482,12 +489,19 @@ func main() {
 	adminGroup.DELETE("/:id", handleDeleteUser)
 
 	// Serve static files from the React frontend "dist" folder
-	if _, err := os.Stat("/app/frontend/dist/index.html"); err == nil {
-		r.Static("/assets", "/app/frontend/dist/assets")
-		r.StaticFile("/power.svg", "/app/frontend/dist/power.svg")
-		r.LoadHTMLGlob("/app/frontend/dist/index.html")
+	frontendPath := "/app/frontend/dist" // Default path for Docker
+	if _, err := os.Stat("../frontend/dist/index.html"); err == nil {
+		frontendPath = "../frontend/dist" // Path if running from backend folder
+	} else if _, err := os.Stat("./frontend/dist/index.html"); err == nil {
+		frontendPath = "./frontend/dist" // Path if running from project root
+	}
 
-		// Catch-all route for React Router (if you ever use it) or just to serve the main HTML page
+	if _, err := os.Stat(frontendPath + "/index.html"); err == nil {
+		r.Static("/assets", frontendPath+"/assets")
+		r.StaticFile("/power.svg", frontendPath+"/power.svg")
+		r.LoadHTMLGlob(frontendPath + "/index.html")
+
+		// Catch-all route for React Router
 		r.NoRoute(func(c *gin.Context) {
 			c.HTML(http.StatusOK, "index.html", nil)
 		})
