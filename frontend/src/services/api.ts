@@ -24,6 +24,14 @@ const getHeaders = () => {
   };
 };
 
+const handleAuthError = (response: Response) => {
+  if (response.status === 401) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    window.location.reload();
+  }
+};
+
 export const login = async (email: string, password: string): Promise<{token: string, user: User}> => {
   const response = await fetch(`${API_BASE}/login`, {
     method: 'POST',
@@ -47,6 +55,7 @@ export const checkSetup = async (): Promise<{needs_setup: boolean}> => {
 export const fetchHosts = async (): Promise<Host[]> => {
   const response = await fetch(`${API_BASE}/hosts`, { headers: getHeaders() });
   if (!response.ok) {
+    handleAuthError(response);
     throw new Error('Failed to fetch hosts');
   }
   return response.json();
@@ -55,6 +64,7 @@ export const fetchHosts = async (): Promise<Host[]> => {
 export const wakeHost = async (id: string): Promise<void> => {
   const response = await fetch(`${API_BASE}/wol/${id}`, { method: 'POST', headers: getHeaders() });
   if (!response.ok) {
+    handleAuthError(response);
     throw new Error('Failed to wake host');
   }
 };
@@ -62,6 +72,7 @@ export const wakeHost = async (id: string): Promise<void> => {
 export const shutdownHost = async (id: string): Promise<void> => {
   const response = await fetch(`${API_BASE}/shutdown/${id}`, { method: 'POST', headers: getHeaders() });
   if (!response.ok) {
+    handleAuthError(response);
     throw new Error('Failed to shutdown host');
   }
 };
@@ -69,6 +80,7 @@ export const shutdownHost = async (id: string): Promise<void> => {
 export const fetchUsers = async (): Promise<User[]> => {
   const response = await fetch(`${API_BASE}/users`, { headers: getHeaders() });
   if (!response.ok) {
+    handleAuthError(response);
     throw new Error('Failed to fetch users');
   }
   return response.json();
@@ -81,6 +93,7 @@ export const createUser = async (email: string, password: string, isAdmin: boole
     body: JSON.stringify({ email, password, is_admin: isAdmin, devices })
   });
   if (!response.ok) {
+    handleAuthError(response);
     throw new Error('Failed to create user');
   }
 }
@@ -91,6 +104,7 @@ export const deleteUser = async (id: number): Promise<void> => {
     headers: getHeaders()
   });
   if (!response.ok) {
+    handleAuthError(response);
     throw new Error('Failed to delete user');
   }
 }
@@ -102,6 +116,7 @@ export const updateUser = async (id: number, data: { password?: string, is_admin
     body: JSON.stringify(data)
   });
   if (!response.ok) {
+    handleAuthError(response);
     throw new Error('Failed to update user');
   }
 }
