@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -142,6 +143,14 @@ func handleLogin(c *gin.Context) {
 		return
 	}
 
+	clientIP := c.ClientIP()
+	if retryAfter := loginLimiter.retryAfter(clientIP, req.Email, time.Now()); retryAfter > 0 {
+		rateLimitedLoginAttemptsTotal.Add(1)
+		c.Header("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many login attempts; try again later"})
+		return
+	}
+
 	user, err := GetUserByEmail(req.Email)
 	if err != nil {
 		// If no administrator exists, atomically create this user as the first one.
@@ -155,6 +164,7 @@ func handleLogin(c *gin.Context) {
 			err = CreateInitialAdmin(req.Email, hash)
 			if err != nil {
 				if errors.Is(err, ErrInitialAdminExists) {
+					loginLimiter.recordFailure(clientIP, req.Email, time.Now())
 					c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 				} else {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create initial admin user"})
@@ -168,13 +178,17 @@ func handleLogin(c *gin.Context) {
 				return
 			}
 		} else {
+			CheckPasswordHash(req.Password, dummyPasswordHash)
+			loginLimiter.recordFailure(clientIP, req.Email, time.Now())
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 			return
 		}
 	} else if !CheckPasswordHash(req.Password, user.PasswordHash) {
+		loginLimiter.recordFailure(clientIP, req.Email, time.Now())
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
+	loginLimiter.recordSuccess(clientIP, req.Email)
 
 	token, err := GenerateJWT(user)
 	if err != nil {

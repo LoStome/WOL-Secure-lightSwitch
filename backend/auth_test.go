@@ -1,17 +1,66 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+func TestLoginRateLimitsRepeatedInvalidPasswords(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupAuthTestDB(t)
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hash test password: %v", err)
+	}
+	if err := DB.Create(&User{
+		Email:        "user@example.com",
+		PasswordHash: string(passwordHash),
+		IsAdmin:      true,
+	}).Error; err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
+
+	previousLimiter := loginLimiter
+	loginLimiter = newLoginAttemptLimiter(2, time.Minute, time.Minute)
+	t.Cleanup(func() { loginLimiter = previousLimiter })
+
+	router := gin.New()
+	router.POST("/login", handleLogin)
+	body := []byte(`{"email":"user@example.com","password":"wrong-password"}`)
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("invalid login %d returned %d, want %d", attempt, response.Code, http.StatusUnauthorized)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("login after repeated failures returned %d, want %d", response.Code, http.StatusTooManyRequests)
+	}
+	if response.Header().Get("Retry-After") == "" {
+		t.Fatal("rate-limited login did not include Retry-After")
+	}
+}
 
 func TestLoadJWTSecretRejectsInvalidConfiguration(t *testing.T) {
 	tests := []struct {
