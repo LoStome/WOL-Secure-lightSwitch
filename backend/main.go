@@ -415,6 +415,10 @@ func handleCheckSetup(c *gin.Context) {
 
 
 func main() {
+	if err := initializeJWTSecret(); err != nil {
+		log.Fatalf("Invalid JWT configuration: %v", err)
+	}
+
 	fmt.Println("Main Starting...")
 
 	// Parse CLI flags

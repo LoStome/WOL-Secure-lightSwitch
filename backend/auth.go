@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -15,13 +16,49 @@ import (
 
 var jwtSecret []byte
 
-func init() {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		secret = "default-insecure-secret-change-me"
-		fmt.Println("WARNING: JWT_SECRET environment variable is not set. Using default insecure secret!")
+const minimumJWTSecretLength = 32
+
+var insecureJWTSecrets = map[string]struct{}{
+	"default-insecure-secret-change-me":    {},
+	"your_very_long_and_random_jwt_secret": {},
+}
+
+func loadJWTSecret() ([]byte, error) {
+	secretFile := strings.TrimSpace(os.Getenv("JWT_SECRET_FILE"))
+	var secret string
+
+	if secretFile != "" {
+		contents, err := os.ReadFile(secretFile)
+		if err != nil {
+			return nil, fmt.Errorf("read JWT_SECRET_FILE: %w", err)
+		}
+		secret = strings.TrimSpace(string(contents))
+	} else {
+		secret = strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	}
-	jwtSecret = []byte(secret)
+
+	if secret == "" {
+		return nil, errors.New("JWT secret is required: set JWT_SECRET_FILE or JWT_SECRET")
+	}
+	if utf8.RuneCountInString(secret) < minimumJWTSecretLength {
+		return nil, fmt.Errorf("JWT secret must be at least %d characters", minimumJWTSecretLength)
+	}
+
+	placeholder := strings.Trim(secret, "\"'")
+	if _, insecure := insecureJWTSecrets[placeholder]; insecure {
+		return nil, errors.New("JWT secret must not use a known placeholder")
+	}
+
+	return []byte(secret), nil
+}
+
+func initializeJWTSecret() error {
+	secret, err := loadJWTSecret()
+	if err != nil {
+		return err
+	}
+	jwtSecret = secret
+	return nil
 }
 
 // HashPassword generates a bcrypt hash of the password

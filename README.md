@@ -53,6 +53,14 @@ The easiest way to run WOL Secure LightSwitch is via Docker.
 ### 2. Configuration
 Create a `docker-compose.yml` file on your server (or use the one provided in the repository [docker-compose.yml](https://github.com/LoStome/WOL-Secure-lightSwitch/blob/main/docker-compose.yml)):
 
+Generate a dedicated JWT secret before starting the service. Keep this file private and never commit it:
+
+```bash
+mkdir -p data
+openssl rand -hex 32 > data/jwt_secret
+chmod 600 data/jwt_secret
+```
+
 ```yaml
 version: '3.8'
 
@@ -66,10 +74,19 @@ services:
     environment:
       - PORT=7500 # Change this port to your liking
       - TZ=Europe/Rome # Change this to your desired timezone
+      - JWT_SECRET_FILE=/run/secrets/jwt_secret
+    secrets:
+      - jwt_secret
     volumes:
       - ./data:/app/data # This is where your hosts.yaml and database will live
       - /home/user/.ssh:/app/data/.ssh:ro # this is needed for key-based auth if you want to use it
+
+secrets:
+  jwt_secret:
+    file: ./data/jwt_secret
 ```
+For local runs outside Docker, you can set `JWT_SECRET` directly to a randomly generated value of at least 32 characters. `JWT_SECRET_FILE` takes precedence when both variables are set.
+
 *Note for SSH Keys: you could also just copy the keys into a data/ssh folder and not reference them in the hosts.yaml file. This is not recommended for security reasons.*
 
 ### 3. Define Your Devices
