@@ -44,6 +44,16 @@ export const login = async (email: string, password: string): Promise<{token: st
   return response.json();
 }
 
+export const logout = async (): Promise<void> => {
+  const response = await fetch(`${API_BASE}/logout`, {
+    method: 'POST',
+    headers: getHeaders()
+  });
+  if (!response.ok && response.status !== 401) {
+    throw new Error('Failed to revoke session');
+  }
+}
+
 export const checkSetup = async (): Promise<{needs_setup: boolean}> => {
   const response = await fetch(`${API_BASE}/setup`);
   if (!response.ok) {

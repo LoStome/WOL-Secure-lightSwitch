@@ -16,6 +16,7 @@ type User struct {
 	Email        string       `gorm:"uniqueIndex;not null" json:"email"`
 	PasswordHash string       `gorm:"not null" json:"-"`
 	IsAdmin      bool         `gorm:"default:false" json:"is_admin"`
+	TokenVersion uint         `gorm:"not null;default:0" json:"-"`
 	Devices      []UserDevice `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;" json:"devices"`
 }
 
@@ -111,11 +112,17 @@ func UpdateUser(userID uint, passwordHash *string, isAdmin *bool, deviceIDs []st
 	}
 
 	// Update fields if provided
+	invalidateTokens := false
 	if passwordHash != nil && *passwordHash != "" {
 		user.PasswordHash = *passwordHash
+		invalidateTokens = true
 	}
 	if isAdmin != nil {
+		invalidateTokens = invalidateTokens || user.IsAdmin != *isAdmin
 		user.IsAdmin = *isAdmin
+	}
+	if invalidateTokens {
+		user.TokenVersion++
 	}
 
 	// Begin transaction to ensure data integrity
@@ -150,4 +157,17 @@ func UpdateUser(userID uint, passwordHash *string, isAdmin *bool, deviceIDs []st
 
 	// Commit the transaction
 	return tx.Commit().Error
+}
+
+func RevokeUserTokens(userID, tokenVersion uint) error {
+	result := DB.Model(&User{}).
+		Where("id = ? AND token_version = ?", userID, tokenVersion).
+		UpdateColumn("token_version", gorm.Expr("token_version + ?", 1))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("token is no longer valid")
+	}
+	return nil
 }

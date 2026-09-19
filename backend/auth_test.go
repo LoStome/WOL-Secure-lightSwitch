@@ -1,10 +1,16 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestLoadJWTSecretRejectsInvalidConfiguration(t *testing.T) {
@@ -86,5 +92,88 @@ func TestLoadJWTSecretDoesNotFallBackWhenFileIsMissing(t *testing.T) {
 
 	if _, err := loadJWTSecret(); err == nil {
 		t.Fatal("loadJWTSecret() succeeded with a missing configured secret file")
+	}
+}
+
+func setupAuthTestDB(t *testing.T) {
+	t.Helper()
+
+	previousDB := DB
+	var err error
+	DB, err = gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	if err := DB.AutoMigrate(&User{}, &UserDevice{}); err != nil {
+		t.Fatalf("migrate test database: %v", err)
+	}
+	t.Cleanup(func() { DB = previousDB })
+}
+
+func authenticatedRequest(t *testing.T, router http.Handler, method, path, token string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(method, path, nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func TestAdminMiddlewareUsesCurrentDatabaseRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupAuthTestDB(t)
+	jwtSecret = []byte(strings.Repeat("s", minimumJWTSecretLength))
+
+	admin := User{Email: "admin@example.com", PasswordHash: "unused", IsAdmin: true}
+	if err := DB.Create(&admin).Error; err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	token, err := GenerateJWT(&admin)
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+
+	router := gin.New()
+	router.GET("/admin", AuthMiddleware(), AdminMiddleware(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	if response := authenticatedRequest(t, router, http.MethodGet, "/admin", token); response.Code != http.StatusNoContent {
+		t.Fatalf("admin request before demotion returned %d, want %d", response.Code, http.StatusNoContent)
+	}
+
+	if err := DB.Model(&admin).Update("is_admin", false).Error; err != nil {
+		t.Fatalf("demote admin: %v", err)
+	}
+	if response := authenticatedRequest(t, router, http.MethodGet, "/admin", token); response.Code != http.StatusForbidden {
+		t.Fatalf("admin request after demotion returned %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
+func TestLogoutRevokesCurrentToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupAuthTestDB(t)
+	jwtSecret = []byte(strings.Repeat("s", minimumJWTSecretLength))
+
+	user := User{Email: "user@example.com", PasswordHash: "unused"}
+	if err := DB.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	token, err := GenerateJWT(&user)
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+
+	router := gin.New()
+	router.POST("/logout", AuthMiddleware(), handleLogout)
+	router.GET("/protected", AuthMiddleware(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	if response := authenticatedRequest(t, router, http.MethodPost, "/logout", token); response.Code != http.StatusNoContent {
+		t.Fatalf("logout returned %d, want %d", response.Code, http.StatusNoContent)
+	}
+	if response := authenticatedRequest(t, router, http.MethodGet, "/protected", token); response.Code != http.StatusUnauthorized {
+		t.Fatalf("request with logged-out token returned %d, want %d", response.Code, http.StatusUnauthorized)
 	}
 }

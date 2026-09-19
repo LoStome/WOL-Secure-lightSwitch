@@ -3,7 +3,7 @@ import DeviceList from './components/DeviceList';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel'; 
 import { Zap, LogOut, Shield } from 'lucide-react';
-import type { User } from './services/api';
+import { logout, type User } from './services/api';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -37,12 +37,18 @@ function App() {
     setIsAuthenticated(true);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setCurrentUser(null);
-    setIsAuthenticated(false);
-    setShowAdmin(false);
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // Local logout must still succeed if the session is already invalid or unreachable.
+    } finally {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setCurrentUser(null);
+      setIsAuthenticated(false);
+      setShowAdmin(false);
+    }
   };
 
   if (isInitializing) {

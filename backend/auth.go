@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -74,22 +75,21 @@ func CheckPasswordHash(password, hash string) bool {
 }
 
 type Claims struct {
-	UserID  uint   `json:"user_id"`
-	Email   string `json:"email"`
-	IsAdmin bool   `json:"is_admin"`
+	TokenVersion uint `json:"token_version"`
 	jwt.RegisteredClaims
 }
 
+const jwtLifetime = time.Hour
+
 // GenerateJWT creates a new JWT for an authenticated user
 func GenerateJWT(user *User) (string, error) {
-	expirationTime := time.Now().Add(24 * time.Hour * 7) // 1 week
+	now := time.Now()
 	claims := &Claims{
-		UserID:  user.ID,
-		Email:   user.Email,
-		IsAdmin: user.IsAdmin,
+		TokenVersion: user.TokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   strconv.FormatUint(uint64(user.ID), 10),
+			ExpiresAt: jwt.NewNumericDate(now.Add(jwtLifetime)),
+			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
 
@@ -138,11 +138,23 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			return
 		}
+		userID, err := strconv.ParseUint(claims.Subject, 10, strconv.IntSize)
+		if err != nil || userID == 0 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			return
+		}
 
-		// Attach user info to the context
-		c.Set("userID", claims.UserID)
-		c.Set("userEmail", claims.Email)
-		c.Set("isAdmin", claims.IsAdmin)
+		user, err := GetUserByID(uint(userID))
+		if err != nil || user.TokenVersion != claims.TokenVersion {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			return
+		}
+
+		// Attach current database values rather than trusting mutable JWT claims.
+		c.Set("userID", user.ID)
+		c.Set("userEmail", user.Email)
+		c.Set("isAdmin", user.IsAdmin)
+		c.Set("tokenVersion", user.TokenVersion)
 
 		c.Next()
 	}

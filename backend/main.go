@@ -186,6 +186,15 @@ func handleLogin(c *gin.Context) {
 	})
 }
 
+func handleLogout(c *gin.Context) {
+	if err := RevokeUserTokens(c.GetUint("userID"), c.GetUint("tokenVersion")); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 // Check if user is authorized for a specific device based on UserDevice mapping
 func isAuthorizedForDevice(userID uint, deviceID string, isAdmin bool) bool {
 	if isAdmin {
@@ -475,7 +484,8 @@ func main() {
 	// Protected Routes
 	protected := r.Group("/api")
 	protected.Use(AuthMiddleware())
-	
+	protected.POST("/logout", handleLogout)
+
 	protected.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong"})
 	})
