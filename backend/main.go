@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 )
 
 type Host struct {
@@ -142,7 +144,7 @@ func handleLogin(c *gin.Context) {
 
 	user, err := GetUserByEmail(req.Email)
 	if err != nil {
-		// If user not found, check if there are any admins. If not, auto-create this user as the first admin.
+		// If no administrator exists, atomically create this user as the first one.
 		hasAdmins, dbErr := HasAdmins()
 		if dbErr == nil && !hasAdmins {
 			hash, hashErr := HashPassword(req.Password)
@@ -150,9 +152,13 @@ func handleLogin(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 				return
 			}
-			err = CreateUser(req.Email, hash, true, []string{})
+			err = CreateInitialAdmin(req.Email, hash)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create initial admin user"})
+				if errors.Is(err, ErrInitialAdminExists) {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+				} else {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create initial admin user"})
+				}
 				return
 			}
 			// Fetch the newly created user
@@ -385,27 +391,15 @@ func handleDeleteUser(c *gin.Context) {
 		return
 	}
 
-	// Fetch user first to check if they are an admin
-	var user User
-	if err := DB.First(&user, userID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
-	}
-
-	if user.IsAdmin {
-		count, err := GetAdminCount()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check admin count"})
+	if err := DeleteUser(uint(userID)); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
-		if count <= 1 {
+		if errors.Is(err, ErrLastAdministrator) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot delete the last administrator"})
 			return
 		}
-	}
-
-	// Prevent self-deletion if needed, but for simplicity we'll just delete
-	if err := DB.Delete(&User{}, userID).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user"})
 		return
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 
@@ -9,6 +10,15 @@ import (
 )
 
 var DB *gorm.DB
+
+var (
+	ErrInitialAdminExists = errors.New("an administrator already exists")
+	ErrLastAdministrator  = errors.New("cannot remove the last administrator")
+)
+
+func sqliteDSN(path string) string {
+	return path + "?_pragma=busy_timeout%3d10000"
+}
 
 // User represents an administrator or user in the system
 type User struct {
@@ -29,10 +39,10 @@ type UserDevice struct {
 
 func InitDB() {
 	var err error
-	DB, err = gorm.Open(sqlite.Open("data/secure-switch.db"), &gorm.Config{})
+	DB, err = gorm.Open(sqlite.Open(sqliteDSN("data/secure-switch.db")), &gorm.Config{})
 	if err != nil {
 		// try fallback path if running from another dir
-		DB, err = gorm.Open(sqlite.Open("../data/secure-switch.db"), &gorm.Config{})
+		DB, err = gorm.Open(sqlite.Open(sqliteDSN("../data/secure-switch.db")), &gorm.Config{})
 		if err != nil {
 			log.Fatalf("failed to connect database: %v", err)
 		}
@@ -87,6 +97,24 @@ func CreateUser(email string, passwordHash string, isAdmin bool, deviceIDs []str
 	return DB.Create(&user).Error
 }
 
+// CreateInitialAdmin atomically creates the first administrator. Keeping the
+// existence check in the INSERT prevents concurrent setup requests from both
+// observing an empty administrator set and creating separate accounts.
+func CreateInitialAdmin(email string, passwordHash string) error {
+	result := DB.Exec(`
+		INSERT INTO users (email, password_hash, is_admin, token_version)
+		SELECT ?, ?, ?, ?
+		WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_admin = ?)
+	`, email, passwordHash, true, 0, true)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrInitialAdminExists
+	}
+	return nil
+}
+
 func GetAdminCount() (int64, error) {
 	var count int64
 	err := DB.Model(&User{}).Where("is_admin = ?", true).Count(&count).Error
@@ -94,69 +122,89 @@ func GetAdminCount() (int64, error) {
 }
 
 func UpdateUser(userID uint, passwordHash *string, isAdmin *bool, deviceIDs []string) error {
-	var user User
-	// Fetch the user
-	if err := DB.First(&user, userID).Error; err != nil {
-		return err
-	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]interface{}{
+			// A no-op write makes this the transaction's first statement and
+			// acquires SQLite's write lock before any dependent reads.
+			"id": gorm.Expr("id"),
+		}
+		if passwordHash != nil && *passwordHash != "" {
+			updates["password_hash"] = *passwordHash
+			updates["token_version"] = gorm.Expr("token_version + 1")
+		}
+		if isAdmin != nil {
+			updates["is_admin"] = *isAdmin
+			if _, passwordChanged := updates["password_hash"]; !passwordChanged {
+				updates["token_version"] = gorm.Expr(
+					"token_version + CASE WHEN is_admin <> ? THEN 1 ELSE 0 END",
+					*isAdmin,
+				)
+			}
+		}
 
-	// Prevent demoting the last admin
-	if user.IsAdmin && isAdmin != nil && !*isAdmin {
-		count, err := GetAdminCount()
-		if err != nil {
+		query := tx.Model(&User{}).Where("id = ?", userID)
+		if isAdmin != nil && !*isAdmin {
+			query = query.Where(`
+				(
+					is_admin = ? OR
+					(SELECT COUNT(*) FROM users AS administrators
+					 WHERE administrators.is_admin = ?) > 1
+				)
+			`, false, true)
+		}
+
+		result := query.UpdateColumns(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			var count int64
+			if err := tx.Model(&User{}).Where("id = ?", userID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return gorm.ErrRecordNotFound
+			}
+			return ErrLastAdministrator
+		}
+
+		if err := tx.Where("user_id = ?", userID).Delete(&UserDevice{}).Error; err != nil {
 			return err
 		}
-		if count <= 1 {
-			return fmt.Errorf("cannot demote the last administrator")
+		for _, devID := range deviceIDs {
+			if err := tx.Create(&UserDevice{UserID: userID, DeviceID: devID}).Error; err != nil {
+				return err
+			}
 		}
+		return nil
+	})
+}
+
+// DeleteUser atomically enforces that an administrator may only be deleted
+// while another administrator exists.
+func DeleteUser(userID uint) error {
+	result := DB.Where(`
+		id = ? AND (
+			is_admin = ? OR
+			(SELECT COUNT(*) FROM users AS administrators
+			 WHERE administrators.is_admin = ?) > 1
+		)
+	`, userID, false, true).Delete(&User{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
 	}
 
-	// Update fields if provided
-	invalidateTokens := false
-	if passwordHash != nil && *passwordHash != "" {
-		user.PasswordHash = *passwordHash
-		invalidateTokens = true
-	}
-	if isAdmin != nil {
-		invalidateTokens = invalidateTokens || user.IsAdmin != *isAdmin
-		user.IsAdmin = *isAdmin
-	}
-	if invalidateTokens {
-		user.TokenVersion++
-	}
-
-	// Begin transaction to ensure data integrity
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-
-	// Save the base user
-	if err := tx.Save(&user).Error; err != nil {
-		tx.Rollback()
+	var count int64
+	if err := DB.Model(&User{}).Where("id = ?", userID).Count(&count).Error; err != nil {
 		return err
 	}
-
-	// Delete existing devices for the user
-	if err := tx.Where("user_id = ?", userID).Delete(&UserDevice{}).Error; err != nil {
-		tx.Rollback()
-		return err
+	if count == 0 {
+		return gorm.ErrRecordNotFound
 	}
-
-	// Insert new devices
-	for _, devID := range deviceIDs {
-		newDevice := UserDevice{
-			UserID:   userID,
-			DeviceID: devID,
-		}
-		if err := tx.Create(&newDevice).Error; err != nil {
-			tx.Rollback()
-			return err
-		}
-	}
-
-	// Commit the transaction
-	return tx.Commit().Error
+	return ErrLastAdministrator
 }
 
 func RevokeUserTokens(userID, tokenVersion uint) error {
