@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
@@ -256,7 +255,7 @@ func handleGetHosts(c *gin.Context) {
 				hosts[i].LastPinged = state.LastPinged
 			}
 			hostStates.RUnlock()
-			
+
 			authorizedHosts = append(authorizedHosts, hosts[i])
 		}
 	}
@@ -430,6 +429,62 @@ func handleCheckSetup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"needs_setup": !hasAdmins})
 }
 
+func newRouter() *gin.Engine {
+	r := gin.New()
+
+	// Togli il warning "You trusted all proxies..." siccome è un tool locale
+	_ = r.SetTrustedProxies(nil)
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: []string{"/api/hosts"},
+	}))
+	r.Use(gin.Recovery())
+
+	// Public Routes
+	r.POST("/api/login", handleLogin)
+	r.GET("/api/setup", handleCheckSetup)
+
+	// Protected Routes
+	protected := r.Group("/api")
+	protected.Use(AuthMiddleware())
+	protected.POST("/logout", handleLogout)
+
+	protected.GET("/ping", func(c *gin.Context) {
+		c.JSON(200, gin.H{"message": "pong"})
+	})
+
+	protected.GET("/hosts", handleGetHosts)
+	protected.POST("/wol/:id", handleWOL)
+	protected.POST("/shutdown/:id", handleShutdown)
+
+	// Admin Routes
+	adminGroup := protected.Group("/users")
+	adminGroup.Use(AdminMiddleware())
+	adminGroup.GET("", handleGetUsers)
+	adminGroup.POST("", handleCreateUser)
+	adminGroup.PUT("/:id", handleUpdateUser)
+	adminGroup.DELETE("/:id", handleDeleteUser)
+
+	// Serve static files from the React frontend "dist" folder
+	frontendPath := "/app/frontend/dist" // Default path for Docker
+	if _, err := os.Stat("../frontend/dist/index.html"); err == nil {
+		frontendPath = "../frontend/dist" // Path if running from backend folder
+	} else if _, err := os.Stat("./frontend/dist/index.html"); err == nil {
+		frontendPath = "./frontend/dist" // Path if running from project root
+	}
+
+	if _, err := os.Stat(frontendPath + "/index.html"); err == nil {
+		r.Static("/assets", frontendPath+"/assets")
+		r.StaticFile("/power.svg", frontendPath+"/power.svg")
+		r.LoadHTMLGlob(frontendPath + "/index.html")
+
+		// Catch-all route for React Router
+		r.NoRoute(func(c *gin.Context) {
+			c.HTML(http.StatusOK, "index.html", nil)
+		})
+	}
+
+	return r
+}
 
 func main() {
 	if err := initializeJWTSecret(); err != nil {
@@ -474,60 +529,7 @@ func main() {
 
 	var err error = nil
 	//http server for API
-	r := gin.New()
-	
-	// Togli il warning "You trusted all proxies..." siccome è un tool locale
-	_ = r.SetTrustedProxies(nil)
-	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
-		SkipPaths: []string{"/api/hosts"},
-	}))
-	r.Use(gin.Recovery())
-
-	r.Use(cors.Default())
-
-	// Public Routes
-	r.POST("/api/login", handleLogin)
-	r.GET("/api/setup", handleCheckSetup)
-
-	// Protected Routes
-	protected := r.Group("/api")
-	protected.Use(AuthMiddleware())
-	protected.POST("/logout", handleLogout)
-
-	protected.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{"message": "pong"})
-	})
-
-	protected.GET("/hosts", handleGetHosts)
-	protected.POST("/wol/:id", handleWOL)
-	protected.POST("/shutdown/:id", handleShutdown)
-	
-	// Admin Routes
-	adminGroup := protected.Group("/users")
-	adminGroup.Use(AdminMiddleware())
-	adminGroup.GET("", handleGetUsers)
-	adminGroup.POST("", handleCreateUser)
-	adminGroup.PUT("/:id", handleUpdateUser)
-	adminGroup.DELETE("/:id", handleDeleteUser)
-
-	// Serve static files from the React frontend "dist" folder
-	frontendPath := "/app/frontend/dist" // Default path for Docker
-	if _, err := os.Stat("../frontend/dist/index.html"); err == nil {
-		frontendPath = "../frontend/dist" // Path if running from backend folder
-	} else if _, err := os.Stat("./frontend/dist/index.html"); err == nil {
-		frontendPath = "./frontend/dist" // Path if running from project root
-	}
-
-	if _, err := os.Stat(frontendPath + "/index.html"); err == nil {
-		r.Static("/assets", frontendPath+"/assets")
-		r.StaticFile("/power.svg", frontendPath+"/power.svg")
-		r.LoadHTMLGlob(frontendPath + "/index.html")
-
-		// Catch-all route for React Router
-		r.NoRoute(func(c *gin.Context) {
-			c.HTML(http.StatusOK, "index.html", nil)
-		})
-	}
+	r := newRouter()
 
 	// Get port from environment variable, default to 8080 if not set
 	port := os.Getenv("PORT")
