@@ -17,7 +17,10 @@ import (
 
 var jwtSecret []byte
 
-const minimumJWTSecretLength = 32
+const (
+	minimumJWTSecretLength = 32
+	authCookieName         = "secure-switch-auth"
+)
 
 var insecureJWTSecrets = map[string]struct{}{
 	"default-insecure-secret-change-me":    {},
@@ -81,6 +84,30 @@ type Claims struct {
 
 const jwtLifetime = time.Hour
 
+func setAuthCookie(c *gin.Context, token string) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     authCookieName,
+		Value:    token,
+		Path:     "/api",
+		MaxAge:   int(jwtLifetime / time.Second),
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearAuthCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     authCookieName,
+		Value:    "",
+		Path:     "/api",
+		MaxAge:   -1,
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
 // GenerateJWT creates a new JWT for an authenticated user
 func GenerateJWT(user *User) (string, error) {
 	now := time.Now()
@@ -122,18 +149,24 @@ func ValidateJWT(tokenString string) (*Claims, error) {
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		var tokenString string
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header format must be Bearer {token}"})
+				return
+			}
+			tokenString = parts[1]
+		} else if authCookie, err := c.Request.Cookie(authCookieName); err == nil {
+			tokenString = authCookie.Value
+		}
+
+		if tokenString == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
 			return
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if !(len(parts) == 2 && parts[0] == "Bearer") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header format must be Bearer {token}"})
-			return
-		}
-
-		claims, err := ValidateJWT(parts[1])
+		claims, err := ValidateJWT(tokenString)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			return

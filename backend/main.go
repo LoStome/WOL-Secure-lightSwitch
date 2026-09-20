@@ -305,8 +305,8 @@ func handleLogin(c *gin.Context) {
 		return
 	}
 
+	setAuthCookie(c, token)
 	c.JSON(http.StatusOK, gin.H{
-		"token": token,
 		"user": gin.H{
 			"id":       user.ID,
 			"email":    user.Email,
@@ -321,7 +321,16 @@ func handleLogout(c *gin.Context) {
 		return
 	}
 
+	clearAuthCookie(c)
 	c.Status(http.StatusNoContent)
+}
+
+func handleCurrentUser(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"id":       c.GetUint("userID"),
+		"email":    c.GetString("userEmail"),
+		"is_admin": c.GetBool("isAdmin"),
+	})
 }
 
 // Check if user is authorized for a specific device based on UserDevice mapping
@@ -653,6 +662,7 @@ func newRouter() *gin.Engine {
 	protected := r.Group("/api")
 	protected.Use(AuthMiddleware())
 	protected.POST("/logout", handleLogout)
+	protected.GET("/session", handleCurrentUser)
 
 	protected.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong"})

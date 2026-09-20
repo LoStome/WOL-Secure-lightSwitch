@@ -16,23 +16,17 @@ export interface User {
 
 const API_BASE = "/api";
 
-const getHeaders = () => {
-  const token = localStorage.getItem("token");
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { "Authorization": `Bearer ${token}` } : {})
-  };
-};
+const getHeaders = () => ({
+  "Content-Type": "application/json"
+});
 
 const handleAuthError = (response: Response) => {
   if (response.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
     window.location.reload();
   }
 };
 
-export const login = async (email: string, password: string): Promise<{token: string, user: User}> => {
+export const login = async (email: string, password: string): Promise<{user: User}> => {
   const response = await fetch(`${API_BASE}/login`, {
     method: 'POST',
     headers: { "Content-Type": "application/json" },
@@ -43,6 +37,14 @@ export const login = async (email: string, password: string): Promise<{token: st
   }
   return response.json();
 }
+
+export const getCurrentUser = async (): Promise<User> => {
+  const response = await fetch(`${API_BASE}/session`);
+  if (!response.ok) {
+    throw new Error('Not authenticated');
+  }
+  return response.json();
+};
 
 export const logout = async (): Promise<void> => {
   const response = await fetch(`${API_BASE}/logout`, {

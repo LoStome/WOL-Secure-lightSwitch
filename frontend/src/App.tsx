@@ -3,7 +3,7 @@ import DeviceList from './components/DeviceList';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel'; 
 import { Zap, LogOut, Shield } from 'lucide-react';
-import { logout, type User } from './services/api';
+import { getCurrentUser, logout, type User } from './services/api';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -12,27 +12,34 @@ function App() {
   const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
-    // Check if user is already logged in on initial load
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
-    if (token && userStr) {
+    let cancelled = false;
+
+    const restoreSession = async () => {
       try {
-        const user = JSON.parse(userStr);
-        setCurrentUser(user);
-        setIsAuthenticated(true);
-      } catch (e) {
-        // Invalid user data in local storage
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        const user = await getCurrentUser();
+        if (!cancelled) {
+          setCurrentUser(user);
+          setIsAuthenticated(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setCurrentUser(null);
+          setIsAuthenticated(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsInitializing(false);
+        }
       }
-    }
-    
-    setIsInitializing(false);
+    };
+
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleLoginSuccess = (token: string, user: User) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
+  const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
     setIsAuthenticated(true);
   };
@@ -43,8 +50,6 @@ function App() {
     } catch {
       // Local logout must still succeed if the session is already invalid or unreachable.
     } finally {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
       setCurrentUser(null);
       setIsAuthenticated(false);
       setShowAdmin(false);

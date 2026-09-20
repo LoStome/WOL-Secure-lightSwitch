@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, Mail, KeyRound, Loader2, Zap, UserPlus } from 'lucide-react';
-import { login, checkSetup } from '../services/api';
+import { login, checkSetup, type User } from '../services/api';
 
 const minimumPasswordLength = 12;
 const maximumPasswordLength = 72;
 
 interface LoginProps {
-  onLoginSuccess: (token: string, user: any) => void;
+  onLoginSuccess: (user: User) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
@@ -35,7 +35,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
     try {
       const data = await login(email, password);
-      onLoginSuccess(data.token, data.user);
+      onLoginSuccess(data.user);
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
