@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"gopkg.in/yaml.v3"
 )
 
 func testSSHSigner(t *testing.T) ssh.Signer {
@@ -98,7 +100,11 @@ func TestRemoteShutdownHostKeyVerification(t *testing.T) {
 				}
 			}
 			t.Setenv("SSH_KNOWN_HOSTS_FILE", path)
-			err = remoteShutdown(&Host{IP: "127.0.0.1", User: "test", Password: "test", Cmd: "test-command"}, listener.Addr().String())
+			passwordPath := filepath.Join(t.TempDir(), "ssh_password")
+			if err := os.WriteFile(passwordPath, []byte("test\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err = remoteShutdown(&Host{IP: "127.0.0.1", User: "test", PasswordFile: passwordPath, Cmd: "test-command"}, listener.Addr().String())
 			listener.Close()
 			<-done
 			if scenario == "trusted" {
@@ -114,5 +120,107 @@ func TestRemoteShutdownHostKeyVerification(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRemoteShutdownReadsPasswordFromFile(t *testing.T) {
+	const password = "dedicated-test-password"
+
+	passwordPath := filepath.Join(t.TempDir(), "ssh_password")
+	if err := os.WriteFile(passwordPath, []byte(password+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	hostYAML, err := yaml.Marshal(struct {
+		IP           string `yaml:"ip"`
+		User         string `yaml:"user"`
+		PasswordFile string `yaml:"password_file"`
+		Cmd          string `yaml:"cmd"`
+	}{
+		IP:           "127.0.0.1",
+		User:         "test",
+		PasswordFile: passwordPath,
+		Cmd:          "test-command",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var host Host
+	if err := yaml.Unmarshal(hostYAML, &host); err != nil {
+		t.Fatal(err)
+	}
+
+	serverKey := testSSHSigner(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receivedPassword := make(chan string, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+		config := &ssh.ServerConfig{
+			PasswordCallback: func(_ ssh.ConnMetadata, supplied []byte) (*ssh.Permissions, error) {
+				receivedPassword <- string(supplied)
+				if string(supplied) != password {
+					return nil, fmt.Errorf("unexpected password")
+				}
+				return nil, nil
+			},
+		}
+		config.AddHostKey(serverKey)
+		server, channels, requests, handshakeErr := ssh.NewServerConn(conn, config)
+		if handshakeErr != nil {
+			return
+		}
+		defer server.Close()
+		go ssh.DiscardRequests(requests)
+		for newChannel := range channels {
+			channel, channelRequests, channelErr := newChannel.Accept()
+			if channelErr != nil {
+				return
+			}
+			for request := range channelRequests {
+				if request.Type != "exec" {
+					request.Reply(false, nil)
+					continue
+				}
+				request.Reply(true, nil)
+				channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+				channel.Close()
+				return
+			}
+		}
+	}()
+
+	knownHostsPath := filepath.Join(t.TempDir(), "known_hosts")
+	knownHostsLine := knownhosts.Line([]string{listener.Addr().String()}, serverKey.PublicKey()) + "\n"
+	if err := os.WriteFile(knownHostsPath, []byte(knownHostsLine), 0600); err != nil {
+		listener.Close()
+		<-done
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_KNOWN_HOSTS_FILE", knownHostsPath)
+
+	err = remoteShutdown(&host, listener.Addr().String())
+	listener.Close()
+	<-done
+	if err != nil {
+		t.Fatalf("remote shutdown with password file failed: %v", err)
+	}
+	select {
+	case supplied := <-receivedPassword:
+		if supplied != password {
+			t.Fatalf("server received password %q, want %q", supplied, password)
+		}
+	default:
+		t.Fatal("server did not receive password authentication")
 	}
 }

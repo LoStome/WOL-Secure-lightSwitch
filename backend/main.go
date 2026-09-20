@@ -24,7 +24,7 @@ type Host struct {
 	MAC            string   `yaml:"mac"`
 	IP             string   `yaml:"ip"`
 	User           string   `yaml:"user" json:"-"`
-	Password       string   `yaml:"password" json:"-"`
+	PasswordFile   string   `yaml:"password_file" json:"-"`
 	KeyPath        string   `yaml:"key_path" json:"-"`
 	Cmd            string   `yaml:"cmd" json:"-"`
 	SkipInterfaces []string `yaml:"skip_interfaces" json:"-"`

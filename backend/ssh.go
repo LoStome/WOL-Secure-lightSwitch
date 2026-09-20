@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -18,13 +19,17 @@ func remoteShutdown(h *Host, address string) error {
 
 	ip := h.IP
 	user := h.User
-	password := h.Password
+	passwordFile := h.PasswordFile
 	keyPath := h.KeyPath
 	command := h.Cmd
 
 	//default shutdown command if not provided
 	if command == "" {
 		command = "sudo -n /usr/sbin/poweroff"
+	}
+
+	if keyPath != "" && passwordFile != "" {
+		return fmt.Errorf("configurare un solo metodo di autenticazione SSH")
 	}
 
 	if keyPath != "" {
@@ -41,10 +46,18 @@ func remoteShutdown(h *Host, address string) error {
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 		fmt.Println("Debug: Utilizzo autenticazione tramite Chiave SSH")
 
-	} else if password != "" {
+	} else if passwordFile != "" {
+		passwordBytes, err := os.ReadFile(passwordFile)
+		if err != nil {
+			return fmt.Errorf("impossibile leggere il file della password SSH: %w", err)
+		}
+		password := strings.TrimRight(string(passwordBytes), "\r\n")
+		if password == "" {
+			return fmt.Errorf("il file della password SSH è vuoto")
+		}
 
 		authMethods = append(authMethods, ssh.Password(password))
-		fmt.Println("Debug: Utilizzo autenticazione tramite Password")
+		fmt.Println("Debug: Utilizzo autenticazione tramite Password da file")
 	} else {
 		return fmt.Errorf("nessun metodo di autenticazione fornito")
 	}

@@ -4,9 +4,9 @@
   name: "Proxmox Node 1"
   mac: "AA:BB:CC:DD:EE:FF"
   ip: "192.168.1.101" #you can also use the hostname if it resolves correctly from the WOL app server
-  user: "switchbot" # you could create a use specifically for the app, with limited sudo rights
-  password: "your_password" #leave empty if not using password-based auth
-  key_path: "" #leave empty if not using key-based auth
+  user: "switchbot" # use a dedicated account with limited sudo rights
+  password_file: "" # if key auth is unavailable, use only a separately mounted secret file
+  key_path: "/run/secrets/ssh_private_key" # use the dedicated key mounted by Compose
   cmd: "sudo -n /usr/sbin/poweroff"
   ping_interval: 15
   skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
@@ -18,8 +18,8 @@
   mac: "AA:BB:CC:DD:EE:FF"
   ip: "192.168.1.100" #you can also use the hostname if it resolves correctly from the WOL app server
   user: "your_user"
-  password: "your_password" #leave empty if not using password-based auth
-  key_path: "/app/data/.ssh/id_ed25519" #leave empty if not using key-based auth
+  password_file: "" # if key auth is unavailable, use only a separately mounted secret file
+  key_path: "/run/secrets/ssh_private_key" # use the dedicated key mounted by Compose
   cmd: "shutdown /s /t 0"
   ping_interval: 30
   skip_interfaces: ["docker", "veth", "br-"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
