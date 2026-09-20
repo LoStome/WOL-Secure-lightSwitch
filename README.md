@@ -73,6 +73,7 @@ services:
     network_mode: host # Fundamental for Wake-on-LAN to broadcast correctly
     environment:
       - PORT=7500 # Change this port to your liking
+      - BIND_ADDRESS=127.0.0.1 # Keep the application reachable only through the local reverse proxy
       - TZ=Europe/Rome # Change this to your desired timezone
       - JWT_SECRET_FILE=/run/secrets/jwt_secret
     secrets:
@@ -86,6 +87,8 @@ secrets:
     file: ./data/jwt_secret
 ```
 For local runs outside Docker, you can set `JWT_SECRET` directly to a randomly generated value of at least 32 characters. `JWT_SECRET_FILE` takes precedence when both variables are set.
+
+The application serves plain HTTP and binds to `127.0.0.1` by default. Put it behind a reverse proxy that terminates TLS, expose only the proxy's HTTPS port, and block direct access to the application port with the host firewall. Set `BIND_ADDRESS` only when the proxy cannot reach loopback; do not expose the application directly to an untrusted network.
 
 *Note for SSH Keys: you could also just copy the keys into a data/ssh folder and not reference them in the hosts.yaml file. This is not recommended for security reasons.*
 
@@ -176,7 +179,7 @@ docker compose up -d
 
 ## 🖥️ Usage & First-Time Setup
 
-1. **Access the Web Interface:** Open your browser and navigate to `http://<your-server-ip>:7500` (or whatever `PORT` you configured).
+1. **Access the Web Interface:** Open the HTTPS URL configured on your TLS reverse proxy. Do not browse directly to the application's plain-HTTP `PORT`.
 2. **Initial Setup:** On the first visit, the system will recognize that no users exist and will prompt you to create the first account. This account will automatically be granted **Admin privileges**.
 3. **Admin Dashboard:** 
    - Once logged in as an Admin, you can see all devices defined in your `hosts.yaml`.

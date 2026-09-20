@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -429,11 +430,23 @@ func handleCheckSetup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"needs_setup": !hasAdmins})
 }
 
+func securityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Content-Security-Policy", "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
+		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "no-referrer")
+		c.Next()
+	}
+}
+
 func newRouter() *gin.Engine {
 	r := gin.New()
 
 	// Togli il warning "You trusted all proxies..." siccome è un tool locale
 	_ = r.SetTrustedProxies(nil)
+	r.Use(securityHeadersMiddleware())
 	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: []string{"/api/hosts"},
 	}))
@@ -527,7 +540,6 @@ func main() {
 	// Start the ping manager in the background
 	go StartPingManager()
 
-	var err error = nil
 	//http server for API
 	r := newRouter()
 
@@ -537,6 +549,12 @@ func main() {
 		port = "7500"
 	}
 
-	r.Run(":" + port)
-	log.Fatal(err)
+	bindAddress := strings.TrimSpace(os.Getenv("BIND_ADDRESS"))
+	if bindAddress == "" {
+		bindAddress = "127.0.0.1"
+	}
+
+	if err := r.Run(net.JoinHostPort(bindAddress, port)); err != nil {
+		log.Fatal(err)
+	}
 }
