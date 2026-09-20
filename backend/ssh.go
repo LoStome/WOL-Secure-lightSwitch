@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"errors"
 	"os"
 	"strings"
 	"time"
@@ -17,7 +17,6 @@ func RemoteShutdown(h *Host) error {
 func remoteShutdown(h *Host, address string) error {
 	var authMethods []ssh.AuthMethod
 
-	ip := h.IP
 	user := h.User
 	passwordFile := h.PasswordFile
 	keyPath := h.KeyPath
@@ -29,37 +28,35 @@ func remoteShutdown(h *Host, address string) error {
 	}
 
 	if keyPath != "" && passwordFile != "" {
-		return fmt.Errorf("configurare un solo metodo di autenticazione SSH")
+		return errors.New("invalid SSH authentication configuration")
 	}
 
 	if keyPath != "" {
 
 		key, err := os.ReadFile(keyPath)
 		if err != nil {
-			return fmt.Errorf("impossibile leggere la chiave: %v", err)
+			return errors.New("SSH key unavailable")
 		}
 
 		signer, err := ssh.ParsePrivateKey(key)
 		if err != nil {
-			return fmt.Errorf("impossibile decifrare la chiave: %v", err)
+			return errors.New("SSH key invalid")
 		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
-		fmt.Println("Debug: Utilizzo autenticazione tramite Chiave SSH")
 
 	} else if passwordFile != "" {
 		passwordBytes, err := os.ReadFile(passwordFile)
 		if err != nil {
-			return fmt.Errorf("impossibile leggere il file della password SSH: %w", err)
+			return errors.New("SSH password configuration unavailable")
 		}
 		password := strings.TrimRight(string(passwordBytes), "\r\n")
 		if password == "" {
-			return fmt.Errorf("il file della password SSH è vuoto")
+			return errors.New("SSH password configuration is empty")
 		}
 
 		authMethods = append(authMethods, ssh.Password(password))
-		fmt.Println("Debug: Utilizzo autenticazione tramite Password da file")
 	} else {
-		return fmt.Errorf("nessun metodo di autenticazione fornito")
+		return errors.New("SSH authentication is not configured")
 	}
 
 	// Provision trusted host keys out of band; never accept new keys automatically.
@@ -70,7 +67,7 @@ func remoteShutdown(h *Host, address string) error {
 	}
 	hostKeyCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
-		return fmt.Errorf("impossibile caricare known_hosts SSH: %w", err)
+		return errors.New("SSH host key configuration unavailable")
 	}
 
 	config := &ssh.ClientConfig{
@@ -83,23 +80,18 @@ func remoteShutdown(h *Host, address string) error {
 	//Connection to the SSH server
 	client, err := ssh.Dial("tcp", address, config)
 	if err != nil {
-		return fmt.Errorf("connection failed: %v", err)
+		return errors.New("SSH connection failed")
 	}
 	defer client.Close()
 
 	session, err := client.NewSession()
 	if err != nil {
-		return fmt.Errorf("session failed: %v", err)
+		return errors.New("SSH session failed")
 	}
 	defer session.Close()
 
-	//Execute the shutdown command
-	fmt.Printf("Eseguendo comando: %s su %s\n", command, ip)
-	output, err := session.CombinedOutput(command)
-	if err != nil {
-		fmt.Printf("Errore catturato: %v\n", err)
-	}
-	fmt.Printf("Output del server: %s\n", string(output))
+	// Execute the shutdown command without logging command arguments or remote output.
+	_, _ = session.CombinedOutput(command)
 
 	return nil
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	cryptoRand "crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -113,7 +115,7 @@ func LoadHosts() ([]Host, error) {
 		path = "../data/hosts.yaml"
 		data, err = os.ReadFile(path)
 		if err != nil {
-			fmt.Printf("Error reading hosts.yaml: %v\n", err)
+			log.Print("Error reading hosts.yaml")
 			return nil, err
 		}
 	}
@@ -189,7 +191,7 @@ func StartPingManager() {
 	for {
 		hosts, err := LoadHosts()
 		if err != nil {
-			fmt.Printf("PingManager: Error loading hosts: %v\n", err)
+			log.Print("PingManager: error loading hosts")
 			time.Sleep(10 * time.Second) // retry later
 			continue
 		}
@@ -383,12 +385,12 @@ func handleWOL(c *gin.Context) {
 
 	target, err := findHost(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": strings.ReplaceAll(err.Error(), "\"", "'")})
+		respondActionFailure(c, "wol target lookup", http.StatusNotFound, "Device not found")
 		return
 	}
 
 	if err := SendWol(target); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "WoL Failed: " + strings.ReplaceAll(err.Error(), "\"", "'")})
+		respondActionFailure(c, "wake-on-LAN", http.StatusInternalServerError, "Unable to send Wake-on-LAN packet")
 		return
 	}
 
@@ -407,14 +409,13 @@ func handleShutdown(c *gin.Context) {
 
 	target, err := findHost(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": strings.ReplaceAll(err.Error(), "\"", "'")})
+		respondActionFailure(c, "shutdown target lookup", http.StatusNotFound, "Device not found")
 		return
 	}
 
 	err = RemoteShutdown(target)
 	if err != nil {
-		fmt.Printf("Shutdown failed for %s (%s): %v\n", target.Name, target.IP, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Shutdown failed: " + strings.ReplaceAll(err.Error(), "\"", "'")})
+		respondActionFailure(c, "shutdown", http.StatusInternalServerError, "Unable to shut down device")
 		return
 	}
 
@@ -594,11 +595,49 @@ func requestBodyLimitMiddleware() gin.HandlerFunc {
 	}
 }
 
+const requestIDContextKey = "requestID"
+
+func newRequestID() string {
+	var value [16]byte
+	if _, err := cryptoRand.Read(value[:]); err == nil {
+		return hex.EncodeToString(value[:])
+	}
+	return strconv.FormatInt(time.Now().UnixNano(), 16)
+}
+
+func requestIDMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		requestID := newRequestID()
+		c.Set(requestIDContextKey, requestID)
+		c.Header("X-Request-ID", requestID)
+		c.Next()
+	}
+}
+
+func requestIDFor(c *gin.Context) string {
+	if requestID, exists := c.Get(requestIDContextKey); exists {
+		if value, ok := requestID.(string); ok && value != "" {
+			return value
+		}
+	}
+	requestID := newRequestID()
+	c.Set(requestIDContextKey, requestID)
+	c.Header("X-Request-ID", requestID)
+	return requestID
+}
+
+func respondActionFailure(c *gin.Context, action string, status int, message string) {
+	requestID := requestIDFor(c)
+	log.Printf("request_id=%s action=%s failed", requestID, action)
+	c.JSON(status, gin.H{"error": message, "request_id": requestID})
+}
+
 func newRouter() *gin.Engine {
 	r := gin.New()
 
 	// Togli il warning "You trusted all proxies..." siccome è un tool locale
 	_ = r.SetTrustedProxies(nil)
+	r.Use(requestIDMiddleware())
 	r.Use(requestBodyLimitMiddleware())
 	r.Use(securityHeadersMiddleware())
 	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
