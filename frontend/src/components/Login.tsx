@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Lock, Mail, KeyRound, Loader2, Zap, UserPlus } from 'lucide-react';
 import { login, checkSetup } from '../services/api';
 
+const minimumPasswordLength = 12;
+const maximumPasswordLength = 72;
+
 interface LoginProps {
   onLoginSuccess: (token: string, user: any) => void;
 }
@@ -76,10 +79,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                maxLength={254}
                 className="w-full pl-10 pr-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
                 placeholder="admin@example.com"
               />
             </div>
+            <p className="text-xs text-zinc-500 ml-1">Use a valid email address, up to 254 bytes.</p>
           </div>
 
           <div className="space-y-2">
@@ -93,10 +98,15 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                minLength={isSetupState ? minimumPasswordLength : undefined}
+                maxLength={maximumPasswordLength}
                 className="w-full pl-10 pr-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
                 placeholder="••••••••"
               />
             </div>
+            <p className="text-xs text-zinc-500 ml-1">
+              {isSetupState ? 'Use at least 12 characters and at most 72 bytes.' : 'Passwords are case-sensitive.'}
+            </p>
           </div>
 
           <button

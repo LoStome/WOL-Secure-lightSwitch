@@ -1,5 +1,8 @@
 # list of hosts to send WoL packets to, along with their shutdown commands and credentials for SSH (if needed)
 # only id, name and mac are need for wol, the rest is for shutdown
+# device IDs must be unique, 1-64 ASCII characters, start with a letter or number,
+# and then contain only letters, numbers, '.', '_' or '-'. Assignments in the admin
+# panel must match an ID written here exactly.
 - id: server-proxmox
   name: "Proxmox Node 1"
   mac: "AA:BB:CC:DD:EE:FF"
@@ -12,7 +15,7 @@
   skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
 
 
-#example config for a windows host
+# example config for a windows host; its id must follow the same device ID rules above
 - id: pc-gaming
   name: "PC Gaming"
   mac: "AA:BB:CC:DD:EE:FF"

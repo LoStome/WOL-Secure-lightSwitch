@@ -120,6 +120,12 @@ In the same directory as your `docker-compose.yml`, create a `data` folder and i
   skip_interfaces: ["docker", "veth", "br-"]
 ```
 
+Host IDs are the device IDs used by the administrator when assigning access. Each ID must be unique, contain 1-64 ASCII characters, start with a letter or number, and then contain only letters, numbers, `.`, `_` or `-`. Assignments must use an ID that exists in `hosts.yaml` and may not repeat an ID.
+
+### Account input rules
+
+When creating an account, use a valid email address of at most 254 bytes. Passwords must contain at least 12 characters and no more than 72 UTF-8 bytes. When editing an account, leave the password field empty to keep the current password. An explicitly empty device list removes all assignments; an omitted device list leaves existing assignments unchanged. JSON request bodies larger than 64 KiB are rejected.
+
 ## 🔐 Remote Shutdown Setup (Linux)
 
 To allow SecureSwitch to shut down your Linux machine, you need to configure the target system to allow the `poweroff` command without manual password entry.

@@ -121,7 +121,7 @@ func GetAdminCount() (int64, error) {
 	return count, err
 }
 
-func UpdateUser(userID uint, passwordHash *string, isAdmin *bool, deviceIDs []string) error {
+func UpdateUser(userID uint, passwordHash *string, isAdmin *bool, deviceIDs *[]string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		updates := map[string]interface{}{
 			// A no-op write makes this the transaction's first statement and
@@ -168,10 +168,13 @@ func UpdateUser(userID uint, passwordHash *string, isAdmin *bool, deviceIDs []st
 			return ErrLastAdministrator
 		}
 
+		if deviceIDs == nil {
+			return nil
+		}
 		if err := tx.Where("user_id = ?", userID).Delete(&UserDevice{}).Error; err != nil {
 			return err
 		}
-		for _, devID := range deviceIDs {
+		for _, devID := range *deviceIDs {
 			if err := tx.Create(&UserDevice{UserID: userID, DeviceID: devID}).Error; err != nil {
 				return err
 			}

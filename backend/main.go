@@ -8,11 +8,13 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/mail"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
@@ -44,6 +46,65 @@ var hostStates = struct {
 	Status map[string]HostState
 }{Status: make(map[string]HostState)}
 
+const (
+	maxRequestBodyBytes   int64 = 64 * 1024
+	maxEmailBytes               = 254
+	minimumPasswordLength       = 12
+	maxPasswordBytes            = 72
+	maxDeviceIDLength           = 64
+)
+
+func validateEmail(email string) (string, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", errors.New("email is required")
+	}
+	if len(email) > maxEmailBytes {
+		return "", fmt.Errorf("email must be at most %d bytes", maxEmailBytes)
+	}
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || parsed.Address != email {
+		return "", errors.New("email must be a valid address")
+	}
+	return email, nil
+}
+
+func validatePassword(password string, requireMinimum bool) error {
+	if password == "" {
+		return errors.New("password is required")
+	}
+	if !utf8.ValidString(password) {
+		return errors.New("password must be valid UTF-8")
+	}
+	if requireMinimum && utf8.RuneCountInString(password) < minimumPasswordLength {
+		return fmt.Errorf("password must be at least %d characters", minimumPasswordLength)
+	}
+	if len(password) > maxPasswordBytes {
+		return fmt.Errorf("password must be at most %d bytes", maxPasswordBytes)
+	}
+	return nil
+}
+
+func validateDeviceID(id string) error {
+	if id == "" {
+		return errors.New("device ID is required")
+	}
+	if len(id) > maxDeviceIDLength {
+		return fmt.Errorf("device ID must be at most %d characters", maxDeviceIDLength)
+	}
+	for index := 0; index < len(id); index++ {
+		character := id[index]
+		isLetterOrDigit := character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9'
+		if (index == 0 && !isLetterOrDigit) ||
+			(index > 0 && !isLetterOrDigit && character != '.' && character != '_' && character != '-') {
+			return errors.New("device ID must start with a letter or number and contain only letters, numbers, '.', '_' or '-'")
+		}
+	}
+	return nil
+}
+
 // load hosts from yaml file, this is where you add new hosts to manage, along with their credentials and shutdown commands
 func LoadHosts() ([]Host, error) {
 	path := "data/hosts.yaml"
@@ -67,13 +128,45 @@ func LoadHosts() ([]Host, error) {
 
 	seenIDs := make(map[string]bool)
 	for _, h := range hosts {
+		if err := validateDeviceID(h.ID); err != nil {
+			return nil, fmt.Errorf("invalid host ID %q: %w", h.ID, err)
+		}
 		if seenIDs[h.ID] {
-			fmt.Printf("WARNING: Duplicate host ID detected in hosts.yaml: '%s'. This will cause routing and ping issues!\n", h.ID)
+			return nil, fmt.Errorf("duplicate host ID %q", h.ID)
 		}
 		seenIDs[h.ID] = true
 	}
 
 	return hosts, nil
+}
+
+func configuredDeviceIDs() (map[string]struct{}, error) {
+	hosts, err := LoadHosts()
+	if err != nil {
+		return nil, err
+	}
+	configured := make(map[string]struct{}, len(hosts))
+	for _, host := range hosts {
+		configured[host.ID] = struct{}{}
+	}
+	return configured, nil
+}
+
+func validateDeviceIDs(deviceIDs []string, configured map[string]struct{}) error {
+	seen := make(map[string]struct{}, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		if err := validateDeviceID(deviceID); err != nil {
+			return err
+		}
+		if _, duplicate := seen[deviceID]; duplicate {
+			return fmt.Errorf("device ID %q must not be repeated", deviceID)
+		}
+		if _, exists := configured[deviceID]; !exists {
+			return fmt.Errorf("device ID %q is not configured", deviceID)
+		}
+		seen[deviceID] = struct{}{}
+	}
+	return nil
 }
 
 func findHost(id string) (*Host, error) {
@@ -142,6 +235,16 @@ func handleLogin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	email, err := validateEmail(req.Email)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validatePassword(req.Password, false); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Email = email
 
 	clientIP := c.ClientIP()
 	if retryAfter := loginLimiter.retryAfter(clientIP, req.Email, time.Now()); retryAfter > 0 {
@@ -156,6 +259,10 @@ func handleLogin(c *gin.Context) {
 		// If no administrator exists, atomically create this user as the first one.
 		hasAdmins, dbErr := HasAdmins()
 		if dbErr == nil && !hasAdmins {
+			if err := validatePassword(req.Password, true); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			hash, hashErr := HashPassword(req.Password)
 			if hashErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
@@ -342,6 +449,26 @@ func handleCreateUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	email, err := validateEmail(req.Email)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validatePassword(req.Password, true); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.Devices) > 0 {
+		configured, err := configuredDeviceIDs()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load configured devices"})
+			return
+		}
+		if err := validateDeviceIDs(req.Devices, configured); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
 
 	hash, err := HashPassword(req.Password)
 	if err != nil {
@@ -349,7 +476,7 @@ func handleCreateUser(c *gin.Context) {
 		return
 	}
 
-	err = CreateUser(req.Email, hash, req.IsAdmin, req.Devices)
+	err = CreateUser(email, hash, req.IsAdmin, req.Devices)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
@@ -359,15 +486,15 @@ func handleCreateUser(c *gin.Context) {
 }
 
 type UpdateUserRequest struct {
-	Password *string  `json:"password"` // optional
-	IsAdmin  *bool    `json:"is_admin"` // optional
-	Devices  []string `json:"devices"`
+	Password *string   `json:"password"` // optional
+	IsAdmin  *bool     `json:"is_admin"` // optional
+	Devices  *[]string `json:"devices"`  // optional; an empty list clears assignments
 }
 
 func handleUpdateUser(c *gin.Context) {
 	id := c.Param("id")
 	userID, err := strconv.Atoi(id)
-	if err != nil {
+	if err != nil || userID <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
 	}
@@ -377,9 +504,26 @@ func handleUpdateUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.Password != nil {
+		if err := validatePassword(*req.Password, true); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if req.Devices != nil && len(*req.Devices) > 0 {
+		configured, err := configuredDeviceIDs()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load configured devices"})
+			return
+		}
+		if err := validateDeviceIDs(*req.Devices, configured); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
 
 	var hashPtr *string
-	if req.Password != nil && *req.Password != "" {
+	if req.Password != nil {
 		hash, err := HashPassword(*req.Password)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
@@ -441,11 +585,21 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
+func requestBodyLimitMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
+		}
+		c.Next()
+	}
+}
+
 func newRouter() *gin.Engine {
 	r := gin.New()
 
 	// Togli il warning "You trusted all proxies..." siccome è un tool locale
 	_ = r.SetTrustedProxies(nil)
+	r.Use(requestBodyLimitMiddleware())
 	r.Use(securityHeadersMiddleware())
 	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: []string{"/api/hosts"},

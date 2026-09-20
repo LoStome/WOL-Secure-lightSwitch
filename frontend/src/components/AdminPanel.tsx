@@ -147,9 +147,11 @@ const AdminPanel = () => {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={!!editingUserId} // Don't allow email change for now
+                maxLength={254}
                 className={`w-full px-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all ${editingUserId ? 'opacity-50 cursor-not-allowed' : ''}`}
                 placeholder="user@example.com"
               />
+              <p className="text-xs text-zinc-500 ml-1">Use a valid email address, up to 254 bytes.</p>
             </div>
             
             <div className="space-y-2">
@@ -161,9 +163,12 @@ const AdminPanel = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required={!editingUserId}
+                minLength={12}
+                maxLength={72}
                 className="w-full px-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
                 placeholder={editingUserId ? "•••••••• (unchanged)" : "••••••••"}
               />
+              <p className="text-xs text-zinc-500 ml-1">At least 12 characters and at most 72 bytes. Leave blank while editing to keep the current password.</p>
             </div>
           </div>
 
@@ -190,6 +195,7 @@ const AdminPanel = () => {
                 <span>Allowed Devices</span>
                 <span className="text-zinc-500 font-normal normal-case">Select which hosts this user can see and control</span>
               </label>
+              <p className="text-xs text-zinc-500 ml-1">Device IDs come from hosts.yaml and use 1-64 ASCII characters: letters, numbers, '.', '_' or '-'; the first character must be a letter or number.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {hosts.map(host => (
                   <label 
