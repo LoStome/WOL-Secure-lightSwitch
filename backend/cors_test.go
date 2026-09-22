@@ -7,7 +7,10 @@ import (
 )
 
 func TestRouterDoesNotAllowCrossOriginRequests(t *testing.T) {
-	router := newRouter()
+	router, err := newRouter(nil)
+	if err != nil {
+		t.Fatalf("create router: %v", err)
+	}
 	request := httptest.NewRequest(http.MethodOptions, "/api/login", nil)
 	request.Header.Set("Origin", "https://attacker.example")
 	request.Header.Set("Access-Control-Request-Method", http.MethodPost)

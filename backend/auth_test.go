@@ -33,7 +33,7 @@ func TestLoginRateLimitsRepeatedInvalidPasswords(t *testing.T) {
 	}
 
 	previousLimiter := loginLimiter
-	loginLimiter = newLoginAttemptLimiter(2, time.Minute, time.Minute)
+	loginLimiter = newLoginAttemptLimiter(2, time.Minute, time.Minute, loginMaxTrackedKeys, loginCleanupInterval)
 	t.Cleanup(func() { loginLimiter = previousLimiter })
 
 	router := gin.New()

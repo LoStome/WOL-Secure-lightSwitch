@@ -7,7 +7,10 @@ import (
 )
 
 func TestRouterAddsSecurityHeaders(t *testing.T) {
-	router := newRouter()
+	router, err := newRouter(nil)
+	if err != nil {
+		t.Fatalf("create router: %v", err)
+	}
 	request := httptest.NewRequest(http.MethodGet, "/api/security-header-check", nil)
 	response := httptest.NewRecorder()
 

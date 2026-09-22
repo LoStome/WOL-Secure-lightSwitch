@@ -250,7 +250,7 @@ func handleLogin(c *gin.Context) {
 
 	clientIP := c.ClientIP()
 	if retryAfter := loginLimiter.retryAfter(clientIP, req.Email, time.Now()); retryAfter > 0 {
-		rateLimitedLoginAttemptsTotal.Add(1)
+		loginLimiter.recordRateLimited()
 		c.Header("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many login attempts; try again later"})
 		return
@@ -313,6 +313,10 @@ func handleLogin(c *gin.Context) {
 			"is_admin": user.IsAdmin,
 		},
 	})
+}
+
+func handleLoginMetrics(c *gin.Context) {
+	c.JSON(http.StatusOK, loginLimiter.metrics())
 }
 
 func handleLogout(c *gin.Context) {
@@ -641,11 +645,12 @@ func respondActionFailure(c *gin.Context, action string, status int, message str
 	c.JSON(status, gin.H{"error": message, "request_id": requestID})
 }
 
-func newRouter() *gin.Engine {
+func newRouter(trustedProxies []string) (*gin.Engine, error) {
 	r := gin.New()
 
-	// Togli il warning "You trusted all proxies..." siccome è un tool locale
-	_ = r.SetTrustedProxies(nil)
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
+		return nil, fmt.Errorf("configure trusted proxies: %w", err)
+	}
 	r.Use(requestIDMiddleware())
 	r.Use(requestBodyLimitMiddleware())
 	r.Use(securityHeadersMiddleware())
@@ -680,6 +685,10 @@ func newRouter() *gin.Engine {
 	adminGroup.PUT("/:id", handleUpdateUser)
 	adminGroup.DELETE("/:id", handleDeleteUser)
 
+	metricsGroup := protected.Group("/metrics")
+	metricsGroup.Use(AdminMiddleware())
+	metricsGroup.GET("/login", handleLoginMetrics)
+
 	// Serve static files from the React frontend "dist" folder
 	frontendPath := "/app/frontend/dist" // Default path for Docker
 	if _, err := os.Stat("../frontend/dist/index.html"); err == nil {
@@ -699,7 +708,7 @@ func newRouter() *gin.Engine {
 		})
 	}
 
-	return r
+	return r, nil
 }
 
 func main() {
@@ -740,11 +749,17 @@ func main() {
 		os.Exit(0)
 	}
 
+	trustedProxies, err := parseTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
+	if err != nil {
+		log.Fatalf("Invalid TRUSTED_PROXIES configuration: %v", err)
+	}
+	r, err := newRouter(trustedProxies)
+	if err != nil {
+		log.Fatalf("Failed to configure HTTP router: %v", err)
+	}
+
 	// Start the ping manager in the background
 	go StartPingManager()
-
-	//http server for API
-	r := newRouter()
 
 	// Get port from environment variable, default to 8080 if not set
 	port := os.Getenv("PORT")

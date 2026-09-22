@@ -90,6 +90,8 @@ For local runs outside Docker, you can set `JWT_SECRET` directly to a randomly g
 
 The application serves plain HTTP and binds to `127.0.0.1` by default. Put it behind a reverse proxy that terminates TLS, expose only the proxy's HTTPS port, and block direct access to the application port with the host firewall. Set `BIND_ADDRESS` only when the proxy cannot reach loopback; do not expose the application directly to an untrusted network.
 
+By default the application ignores forwarded client-IP headers. If a reverse proxy is used, set `TRUSTED_PROXIES` to a comma-separated list containing only that proxy's IP addresses or CIDR ranges (for example `127.0.0.1,::1`). Invalid entries and global ranges such as `0.0.0.0/0` or `::/0` are rejected at startup. Do not trust a range that can contain untrusted clients.
+
 *Note for SSH Keys: you could also just copy the keys into a data/ssh folder and not reference them in the hosts.yaml file. This is not recommended for security reasons.*
 
 ### 3. Define Your Devices
