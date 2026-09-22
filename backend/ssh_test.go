@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -222,5 +223,84 @@ func TestRemoteShutdownReadsPasswordFromFile(t *testing.T) {
 		}
 	default:
 		t.Fatal("server did not receive password authentication")
+	}
+}
+
+func TestRemoteShutdownReturnsCommandError(t *testing.T) {
+	const command = "test-command"
+
+	passwordPath := filepath.Join(t.TempDir(), "ssh_password")
+	if err := os.WriteFile(passwordPath, []byte("test-password\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	serverKey := testSSHSigner(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		listener.Close()
+		<-done
+	})
+
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+		config := &ssh.ServerConfig{
+			PasswordCallback: func(ssh.ConnMetadata, []byte) (*ssh.Permissions, error) {
+				return nil, nil
+			},
+		}
+		config.AddHostKey(serverKey)
+		server, channels, requests, err := ssh.NewServerConn(conn, config)
+		if err != nil {
+			return
+		}
+		defer server.Close()
+		go ssh.DiscardRequests(requests)
+		for newChannel := range channels {
+			channel, channelRequests, err := newChannel.Accept()
+			if err != nil {
+				return
+			}
+			for request := range channelRequests {
+				if request.Type != "exec" {
+					request.Reply(false, nil)
+					continue
+				}
+				request.Reply(true, nil)
+				channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{1}))
+				channel.Close()
+				return
+			}
+		}
+	}()
+
+	knownHostsPath := filepath.Join(t.TempDir(), "known_hosts")
+	knownHostsLine := knownhosts.Line([]string{listener.Addr().String()}, serverKey.PublicKey()) + "\n"
+	if err := os.WriteFile(knownHostsPath, []byte(knownHostsLine), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_KNOWN_HOSTS_FILE", knownHostsPath)
+
+	err = remoteShutdown(&Host{
+		IP:           "127.0.0.1",
+		User:         "test",
+		PasswordFile: passwordPath,
+		Cmd:          command,
+	}, listener.Addr().String())
+	if err == nil {
+		t.Fatal("remote shutdown succeeded after command failure")
+	}
+	if strings.Contains(err.Error(), command) || strings.Contains(err.Error(), "remote-secret") {
+		t.Fatalf("command error exposed sensitive details: %v", err)
 	}
 }

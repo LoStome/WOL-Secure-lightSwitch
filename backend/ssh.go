@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -91,7 +92,9 @@ func remoteShutdown(h *Host, address string) error {
 	defer session.Close()
 
 	// Execute the shutdown command without logging command arguments or remote output.
-	_, _ = session.CombinedOutput(command)
+	if _, err := session.CombinedOutput(command); err != nil {
+		return fmt.Errorf("SSH command failed: %w", err)
+	}
 
 	return nil
 }
