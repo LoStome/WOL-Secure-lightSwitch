@@ -37,17 +37,25 @@ FROM alpine:latest
 WORKDIR /app
 
 # Installiamo il pacchetto tzdata per gestire correttamente le timezone, ed eventuali certificati ca
-RUN apk add --no-cache tzdata ca-certificates
+# e creiamo l'utente senza privilegi che esegue il server.
+RUN apk add --no-cache tzdata ca-certificates \
+    && addgroup -S wol \
+    && adduser -S -G wol -h /app -s /sbin/nologin wol \
+    && mkdir -p /app/data \
+    && chown -R wol:wol /app
 
 # Copiamo l'eseguibile Go dalla 'Fase 2'
-COPY --from=backend-builder /app/backend/wol-server /app/wol-server
+COPY --chown=wol:wol --from=backend-builder /app/backend/wol-server /app/wol-server
 
 # Copiamo i file statici di React generati nella 'Fase 1'
 # Ricordi? in main.go abbiamo detto a Go di cercare questi file in "./frontend/dist"
-COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
+COPY --chown=wol:wol --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Espone la porta che userà il nostro programma
 EXPOSE 8080
+
+# Il processo applicativo non deve avere privilegi root.
+USER wol
 
 # Specifichiamo qual è il comando finale per lanciare il server!
 CMD ["/app/wol-server"]
