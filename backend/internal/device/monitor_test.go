@@ -1,14 +1,28 @@
-package main
+package device
 
 import (
 	"context"
+	"secure-switch-backend/internal/config"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
+func TestMonitorsKeepIndependentStates(t *testing.T) {
+	first := NewMonitor()
+	second := NewMonitor()
+	first.status["host-one"] = HostState{Online: true, LastPinged: "12:00:00"}
+	if state := first.State("host-one"); !state.Online || state.LastPinged != "12:00:00" {
+		t.Fatalf("first monitor state = %+v", state)
+	}
+	if state := second.State("host-one"); state.Online || state.LastPinged != "" {
+		t.Fatalf("second monitor inherited state = %+v", state)
+	}
+}
+
 func TestPingManagerLimitsAndCancelsProbes(t *testing.T) {
-	hosts := []Host{
+	monitor := NewMonitor()
+	hosts := []config.Host{
 		{ID: "host1", IP: "192.0.2.1", PingInterval: 1},
 		{ID: "host2", IP: "192.0.2.2", PingInterval: 1},
 		{ID: "host3", IP: "192.0.2.3", PingInterval: 1},
@@ -41,7 +55,7 @@ func TestPingManagerLimitsAndCancelsProbes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runPingManager(ctx, func() ([]Host, error) { return hosts, nil }, probe, ticks)
+		monitor.runPingManager(ctx, func() ([]config.Host, error) { return hosts, nil }, probe, ticks)
 	}()
 	for range 4 {
 		select {
@@ -70,6 +84,7 @@ func TestPingManagerLimitsAndCancelsProbes(t *testing.T) {
 }
 
 func TestPingManagerDoesNotOverlapOneHost(t *testing.T) {
+	monitor := NewMonitor()
 	started := make(chan struct{}, 2)
 	ticks := make(chan time.Time)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,9 +92,9 @@ func TestPingManagerDoesNotOverlapOneHost(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runPingManager(ctx,
-			func() ([]Host, error) {
-				return []Host{{ID: "rel04-overlap", IP: "192.0.2.8", PingInterval: 1}}, nil
+		monitor.runPingManager(ctx,
+			func() ([]config.Host, error) {
+				return []config.Host{{ID: "rel04-overlap", IP: "192.0.2.8", PingInterval: 1}}, nil
 			},
 			func(ctx context.Context, _ string) bool {
 				started <- struct{}{}
@@ -112,14 +127,15 @@ func TestPingManagerDoesNotOverlapOneHost(t *testing.T) {
 }
 
 func TestPingManagerRemovesHostStateAndAllowsReaddedHost(t *testing.T) {
+	monitor := NewMonitor()
 	const id = "rel04-removed"
-	hostStates.Lock()
-	hostStates.Status[id] = HostState{Online: true}
-	hostStates.Unlock()
+	monitor.Lock()
+	monitor.status[id] = HostState{Online: true}
+	monitor.Unlock()
 	defer func() {
-		hostStates.Lock()
-		delete(hostStates.Status, id)
-		hostStates.Unlock()
+		monitor.Lock()
+		delete(monitor.status, id)
+		monitor.Unlock()
 	}()
 
 	var configured atomic.Bool
@@ -133,12 +149,12 @@ func TestPingManagerRemovesHostStateAndAllowsReaddedHost(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runPingManager(ctx,
-			func() ([]Host, error) {
+		monitor.runPingManager(ctx,
+			func() ([]config.Host, error) {
 				if !configured.Load() {
 					return nil, nil
 				}
-				return []Host{{ID: id, IP: "192.0.2.9", PingInterval: 3600}}, nil
+				return []config.Host{{ID: id, IP: "192.0.2.9", PingInterval: 3600}}, nil
 			},
 			func(ctx context.Context, _ string) bool {
 				call := calls.Add(1)
@@ -175,9 +191,9 @@ func TestPingManagerRemovesHostStateAndAllowsReaddedHost(t *testing.T) {
 			if call != 2 {
 				t.Fatalf("unexpected probe number %d", call)
 			}
-			hostStates.RLock()
-			_, exists := hostStates.Status[id]
-			hostStates.RUnlock()
+			monitor.RLock()
+			_, exists := monitor.status[id]
+			monitor.RUnlock()
 			if exists {
 				t.Fatal("removed host state was recreated by its canceled probe")
 			}

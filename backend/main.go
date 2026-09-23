@@ -16,7 +16,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -27,16 +26,6 @@ import (
 )
 
 type Host = config.Host
-
-type HostState struct {
-	Online     bool
-	LastPinged string
-}
-
-var hostStates = struct {
-	sync.RWMutex
-	Status map[string]HostState
-}{Status: make(map[string]HostState)}
 
 const (
 	maxRequestBodyBytes   int64 = 64 * 1024
@@ -267,15 +256,13 @@ func handleGetHosts(c *gin.Context) {
 	for i := range hosts {
 		if isAuthorizedForDevice(userID, hosts[i].ID, isAdmin) {
 			// Attach online state to hosts from cache
-			hostStates.RLock()
-			state := hostStates.Status[hosts[i].ID]
+			state := hostStates.State(hosts[i].ID)
 			hosts[i].Online = state.Online
 			if state.LastPinged == "" {
 				hosts[i].LastPinged = "N/A"
 			} else {
 				hosts[i].LastPinged = state.LastPinged
 			}
-			hostStates.RUnlock()
 
 			authorizedHosts = append(authorizedHosts, hosts[i])
 		}
