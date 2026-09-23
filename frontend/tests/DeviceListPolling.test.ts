@@ -87,14 +87,22 @@ test('clears a previous error after a later successful poll', async (t) => {
   });
 });
 
-test('forwards the abort signal to the hosts request', async (t) => {
+test('aborts the hosts request when its caller signal is aborted', async (t) => {
   const controller = new AbortController();
-  const fetchMock = t.mock.method(globalThis, 'fetch', async () => new Response('[]', {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  }));
+  let requestSignal: AbortSignal | undefined;
+  const fetchMock = t.mock.method(globalThis, 'fetch', (_input, init) => {
+    requestSignal = init?.signal ?? undefined;
+    return new Promise<Response>((_resolve, reject) => {
+      requestSignal?.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      }, { once: true });
+    });
+  });
 
-  await fetchHosts(controller.signal);
+  const request = fetchHosts(controller.signal);
+  controller.abort();
 
-  assert.equal(fetchMock.mock.calls[0]?.arguments[1]?.signal, controller.signal);
+  await assert.rejects(request, { name: 'AbortError' });
+  assert.equal(fetchMock.mock.calls[0]?.arguments[1]?.signal, requestSignal);
+  assert.equal(requestSignal?.aborted, true);
 });
