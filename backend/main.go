@@ -734,6 +734,17 @@ func newRouter(trustedProxies []string) (*gin.Engine, error) {
 	return r, nil
 }
 
+func newHTTPServer(handler http.Handler, address string) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
 func main() {
 	if err := initializeJWTSecret(); err != nil {
 		log.Fatalf("Invalid JWT configuration: %v", err)
@@ -795,7 +806,8 @@ func main() {
 		bindAddress = "127.0.0.1"
 	}
 
-	if err := r.Run(net.JoinHostPort(bindAddress, port)); err != nil {
+	server := newHTTPServer(r, net.JoinHostPort(bindAddress, port))
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
