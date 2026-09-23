@@ -6,7 +6,7 @@ SecureSwitch is a modern, lightweight, and secure web application to manage Wake
 
 - **Wake-on-LAN (WOL):** Easily wake up machines on your local network using Magic Packets.
 - **Remote Shutdown:** Securely shut down devices via SSH commands (supports both password and SSH key authentication).
-- **Ping Monitoring:** Real-time online/offline status tracking for your configured devices.
+- **Ping Monitoring:** Online/offline status shown in the dashboard, refreshed by frontend polling every 10 seconds.
 - **Role-Based Access Control:** 
   - **Admins:** Can manage users, assign devices, and control any device.
   - **Standard Users:** Can only view and control the specific devices assigned to them by an admin.
@@ -64,26 +64,58 @@ chmod 600 data/jwt_secret
 ```yaml
 services:
   wol-switch:
-    image: lostome/wol_secure_lightswitch:latest
+    image: docker.io/lostome/wol_secure_lightswitch@sha256:ceafb2762ffb45b889089b65df241cddae2a4951aa55f3ed60527a500db616dd
     container_name: wol_secure_lightswitch
     restart: unless-stopped
-    network_mode: host # Fundamental for Wake-on-LAN to broadcast correctly
+    network_mode: host # Required for Wake-on-LAN broadcasts
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$${PORT:-7500}/healthz"]
+      interval: 5m
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     environment:
-      - PORT=7500 # Change this port to your liking
-      - BIND_ADDRESS=127.0.0.1 # Keep the application reachable only through the local reverse proxy
-      - TZ=Europe/Rome # Change this to your desired timezone
+      - PORT=7500
+      - BIND_ADDRESS=127.0.0.1
+      - TZ=Europe/Rome
       - JWT_SECRET_FILE=/run/secrets/jwt_secret
+      - SSH_KNOWN_HOSTS_FILE=/run/secrets/ssh_known_hosts
     secrets:
       - jwt_secret
+      - source: ssh_private_key
+        target: ssh_private_key
+        mode: 0400
+      - source: ssh_known_hosts
+        target: ssh_known_hosts
+        mode: 0444
     volumes:
-      - ./data:/app/data # This is where your hosts.yaml and database will live
-      - /home/user/.ssh:/app/data/.ssh:ro # this is needed for key-based auth if you want to use it
+      - ./data:/app/data # hosts.yaml and SQLite database; keep this directory private
 
 secrets:
   jwt_secret:
     file: ./data/jwt_secret
+  ssh_private_key:
+    file: /home/user/.ssh/wol_switch_ed25519 # dedicated SSH key for this service
+  ssh_known_hosts:
+    file: /home/user/.ssh/known_hosts
 ```
-For local runs outside Docker, you can set `JWT_SECRET` directly to a randomly generated value of at least 32 characters. `JWT_SECRET_FILE` takes precedence when both variables are set.
+Replace the SSH secret file paths with files on your server. Provision the target SSH host keys into `known_hosts` out of band and use a dedicated key for this service where possible. The container runs as the unprivileged `wol` user; ensure it can read the mounted secret files and read/write the host data directory. Keep `data/` and the SSH files private. For local runs outside Docker, set `JWT_SECRET` to a random value of at least 32 characters; `JWT_SECRET_FILE` takes precedence when both are set. The service refuses to start without a valid secret.
+
+For password authentication, create a protected file containing only the target account's password. Add these entries to the service and top-level `secrets` sections of Compose:
+
+```yaml
+# Under services.wol-switch.secrets:
+- source: ssh_password
+  target: ssh_password
+
+# Top-level secrets:
+ssh_password:
+  file: /home/user/.config/secureswitch/ssh_password
+```
+
+Then set `password_file: "/run/secrets/ssh_password"` and `key_path: ""` for that host in `hosts.yaml`. Do not configure both credential fields for the same host. With Docker Compose `file:` secrets, the source is bind-mounted and the service-level `mode`, `uid`, and `gid` settings are not applied. Protect the host file itself and make it readable by the container's `wol` user (check its numeric UID/GID in the image); otherwise SSH authentication will fail when the application reads `password_file`. This requirement also applies to the JWT and private-key files mounted from the host.
+
+The healthcheck in this Compose service definition runs automatically and reports whether `/healthz` is healthy. Docker's `restart: unless-stopped` restarts a stopped process, but does not restart a container solely because its health status is `unhealthy`. A Dockerfile `HEALTHCHECK` could make a check the image default, but requires rebuilding and publishing the image, and a deployment can still override or disable it. Neither form alone forces recovery from an unhealthy status.
 
 ### 2.1 Required HTTPS reverse proxy
 
@@ -156,7 +188,22 @@ Run the same command from another LAN host and confirm that it is blocked. If a 
 
 Global trusted-proxy ranges such as `0.0.0.0/0` or `::/0` are rejected. Never trust a subnet containing untrusted clients.
 
-*Note for SSH Keys: you could also just copy the keys into a data/ssh folder and not reference them in the hosts.yaml file. This is not recommended for security reasons.*
+SSH host keys are checked against the configured `known_hosts` file; unknown or changed host keys are not accepted automatically. For Docker Compose, mount that file as `ssh_known_hosts` as shown above. Outside Docker, set `SSH_KNOWN_HOSTS_FILE` to its path (the default is `data/.ssh/known_hosts`). Configure exactly one SSH credential source per host: `key_path` or `password_file`; keep credential files outside published or shared configuration bundles.
+
+### Back up and restore application data
+
+If you want to make a backup, the persistent `data/` directory contains `hosts.yaml` and `secure-switch.db`. The database contains user records, password hashes, and device assignments, so store backups with restrictive access. Back up only the database and host configuration; do not put JWT or SSH secrets in the backup bundle. Stop the service first so SQLite is closed, then run these commands from the directory containing `docker-compose.yml`:
+
+```bash
+docker compose stop
+backup_dir="../secureswitch-backup-$(date +%Y%m%d-%H%M%S)"
+umask 077
+mkdir -m 700 "$backup_dir"
+cp data/secure-switch.db data/hosts.yaml "$backup_dir/"
+docker compose start
+```
+
+To restore, stop the service, copy the chosen backup's `secure-switch.db` and `hosts.yaml` back into `data/`, then start it again. Keep the existing secret files in place separately; restoring the database does not restore or rotate secrets. Verify `/healthz` and sign in after the service starts.
 
 ### 3. Define Your Devices
 In the same directory as your `docker-compose.yml`, create a `data` folder and inside it, create a `hosts.yaml` file based on this structure (see also [data/hosts.yaml.example](https://github.com/LoStome/WOL-Secure-lightSwitch/blob/main/data/hosts.yaml.example)):
@@ -168,8 +215,8 @@ In the same directory as your `docker-compose.yml`, create a `data` folder and i
   mac: "AA:BB:CC:DD:EE:FF"
   ip: "192.168.1.101" 
   user: "switchbot"
-  password: "your_password" # Leave empty if not using password-based auth
-  key_path: "/app/data/.ssh/id_rsa" # Leave empty if not using key-based auth. Must map to a path inside the container!
+  password_file: "" # set to /run/secrets/ssh_password when using password authentication
+  key_path: "/run/secrets/ssh_private_key" # alternatively, use password_file; never configure both
   cmd: "sudo -n /usr/sbin/poweroff"
   ping_interval: 15
   skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"]
@@ -179,8 +226,8 @@ In the same directory as your `docker-compose.yml`, create a `data` folder and i
   mac: "11:22:33:44:55:66"
   ip: "192.168.1.100"
   user: "windows_user"
-  password: "windows_password" 
-  key_path: "/app/data/.ssh/id_ed25519"
+  password_file: ""
+  key_path: "/run/secrets/ssh_private_key"
   cmd: "shutdown /s /t 0"
   ping_interval: 30
   skip_interfaces: ["docker", "veth", "br-"]
