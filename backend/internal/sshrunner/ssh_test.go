@@ -1,4 +1,4 @@
-package main
+package sshrunner
 
 import (
 	"crypto/ed25519"
@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"secure-switch-backend/internal/config"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -106,7 +107,7 @@ func TestRemoteShutdownHostKeyVerification(t *testing.T) {
 			if err := os.WriteFile(passwordPath, []byte("test\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			err = remoteShutdown(&Host{IP: "127.0.0.1", User: "test", PasswordFile: passwordPath, Cmd: "test-command"}, listener.Addr().String())
+			err = remoteShutdown(&config.Host{IP: "127.0.0.1", User: "test", PasswordFile: passwordPath, Cmd: "test-command"}, listener.Addr().String())
 			listener.Close()
 			<-done
 			if scenario == "trusted" {
@@ -147,7 +148,7 @@ func TestRemoteShutdownReadsPasswordFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var host Host
+	var host config.Host
 	if err := yaml.Unmarshal(hostYAML, &host); err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +293,7 @@ func TestRemoteShutdownReturnsCommandError(t *testing.T) {
 	}
 	t.Setenv("SSH_KNOWN_HOSTS_FILE", knownHostsPath)
 
-	err = remoteShutdown(&Host{
+	err = remoteShutdown(&config.Host{
 		IP:           "127.0.0.1",
 		User:         "test",
 		PasswordFile: passwordPath,
@@ -306,7 +307,7 @@ func TestRemoteShutdownReturnsCommandError(t *testing.T) {
 	}
 }
 
-func testSSHShutdownEndpoint(t *testing.T, signer ssh.Signer) (net.Listener, *Host) {
+func testSSHShutdownEndpoint(t *testing.T, signer ssh.Signer) (net.Listener, *config.Host) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -324,7 +325,7 @@ func testSSHShutdownEndpoint(t *testing.T, signer ssh.Signer) (net.Listener, *Ho
 	if err := os.WriteFile(passwordPath, []byte("test-password\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return listener, &Host{IP: "127.0.0.1", User: "test", PasswordFile: passwordPath, Cmd: "test-command"}
+	return listener, &config.Host{IP: "127.0.0.1", User: "test", PasswordFile: passwordPath, Cmd: "test-command"}
 }
 
 func TestRemoteShutdownHandshakeTimeout(t *testing.T) {

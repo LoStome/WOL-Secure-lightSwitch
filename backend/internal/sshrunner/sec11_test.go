@@ -1,7 +1,8 @@
-package main
+package sshrunner
 
 import (
 	"path/filepath"
+	"secure-switch-backend/internal/config"
 	"strings"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 func TestRemoteShutdownDoesNotExposePasswordFilePath(t *testing.T) {
 	passwordPath := filepath.Join(t.TempDir(), "internal-password")
 	err := remoteShutdown(
-		&Host{IP: "192.0.2.10", User: "test", PasswordFile: passwordPath},
+		&config.Host{IP: "192.0.2.10", User: "test", PasswordFile: passwordPath},
 		"192.0.2.10:22",
 	)
 	if err == nil {
