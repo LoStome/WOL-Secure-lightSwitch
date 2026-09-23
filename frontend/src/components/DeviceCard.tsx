@@ -1,45 +1,45 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Power } from 'lucide-react';
 import { wakeHost, shutdownHost } from '../services/api';
 import type { Host } from '../services/api';
+import { DEVICE_ACTION_TIMEOUT_MS, DeviceActionTracker } from './deviceActionState';
+import type { DeviceActionState } from './deviceActionState';
 
 interface DeviceCardProps {
   host: Host;
 }
 
 const DeviceCard: React.FC<DeviceCardProps> = ({ host }) => {
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-
-  // Track the expected state after clicking (true for ON, false for OFF). If null, no action is pending.
-  const [expectedState, setExpectedState] = useState<boolean | null>(null);
+  const [actionState, setActionState] = useState<DeviceActionState>({ status: 'idle' });
+  const [actionTracker] = useState(() => new DeviceActionTracker(setActionState));
 
   // Use the backend's real-time state for UI
   const isOn = host.online;
+  const isLoading = actionState.status === 'sending' || actionState.status === 'waiting';
 
-  // Clear loading state and expected state once the backend state matches what we asked for
-  React.useEffect(() => {
-    if (expectedState !== null && isOn === expectedState) {
-      setIsLoading(false);
-      setExpectedState(null);
+  useEffect(() => {
+    if (actionState.status === 'sending' || actionState.status === 'waiting' || actionState.status === 'timedOut') {
+      actionTracker.confirm(isOn);
     }
-  }, [isOn, expectedState]);
+  }, [actionState, actionTracker, isOn]);
+
+  useEffect(() => () => actionTracker.dispose(), [actionTracker]);
 
   const handlePowerToggle = async () => {
-    setIsLoading(true);
+    const expectedState = !isOn;
+    actionTracker.start(expectedState);
     try {
       if (isOn) {
         // Currently ON, pressing it means Turn OFF (Shutdown)
-        setExpectedState(false);
         await shutdownHost(host.ID);
       } else {
         // Currently OFF, pressing it means Turn ON (Wake)
-        setExpectedState(true);
         await wakeHost(host.ID);
       }
+      actionTracker.commandSent();
     } catch (error) {
       console.error('Action failed:', error);
-      setIsLoading(false);
-      setExpectedState(null);
+      actionTracker.fail();
     }
   };
 
@@ -74,16 +74,32 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ host }) => {
         )}
       </div>
 
-      <button
-        onClick={handlePowerToggle}
-        disabled={isLoading}
-        className={`relative flex items-center justify-center w-16 h-16 rounded-full transition-all duration-300 shadow-inner overflow-hidden ${buttonStyle}`}
-      >
-        {/* Glow effect */}
-        <div className={`absolute inset-0 rounded-full blur-md opacity-50 ${glowStyle}`}></div>
-        
-        <Power className={`w-8 h-8 z-10 ${isLoading ? 'animate-pulse' : ''}`} />
-      </button>
+      <div className="flex flex-col items-center gap-3">
+        <button
+          onClick={handlePowerToggle}
+          disabled={isLoading}
+          aria-busy={isLoading}
+          className={`relative flex items-center justify-center w-16 h-16 rounded-full transition-all duration-300 shadow-inner overflow-hidden ${buttonStyle}`}
+        >
+          {/* Glow effect */}
+          <div className={`absolute inset-0 rounded-full blur-md opacity-50 ${glowStyle}`}></div>
+
+          <Power className={`w-8 h-8 z-10 ${isLoading ? 'animate-pulse' : ''}`} />
+        </button>
+
+        {actionState.status !== 'idle' && (
+          <p
+            className={`max-w-64 text-sm text-center ${actionState.status === 'error' || actionState.status === 'timedOut' ? 'text-amber-400' : 'text-zinc-400'}`}
+            role={actionState.status === 'error' || actionState.status === 'timedOut' ? 'alert' : 'status'}
+            aria-live={actionState.status === 'error' || actionState.status === 'timedOut' ? 'assertive' : 'polite'}
+          >
+            {actionState.status === 'sending' && 'Sending power command...'}
+            {actionState.status === 'waiting' && 'Command sent. Waiting for device confirmation...'}
+            {actionState.status === 'timedOut' && `No confirmation after ${DEVICE_ACTION_TIMEOUT_MS / 1000} seconds. You can try again.`}
+            {actionState.status === 'error' && 'Action failed. Please try again.'}
+          </p>
+        )}
+      </div>
     </div>
   );
 };
