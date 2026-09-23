@@ -1,10 +1,11 @@
-package main
+package wol
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"net"
+	"secure-switch-backend/internal/config"
 	"testing"
 	"time"
 )
@@ -44,7 +45,7 @@ func TestWolSelectsDeviceNetwork(t *testing.T) {
 		}
 		return nil
 	}
-	if err := sendWol(&Host{MAC: "00:11:22:33:44:55", IP: "192.168.1.100"}, network); err != nil {
+	if err := sendWol(&config.Host{MAC: "00:11:22:33:44:55", IP: "192.168.1.100"}, network); err != nil {
 		t.Fatal(err)
 	}
 	if !sent {
@@ -56,25 +57,25 @@ func TestWolSelectionAndPacket(t *testing.T) {
 	cases := []struct {
 		name      string
 		addresses []string
-		host      Host
+		host      config.Host
 		want      string
 	}{
-		{"single without IP", []string{"10.0.0.2/24"}, Host{}, "10.0.0.255:9"},
-		{"ambiguous without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, Host{}, ""},
-		{"explicit without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, Host{WolInterface: "lan"}, "192.168.1.255:9"},
-		{"explicit wins", []string{"10.0.0.2/24", "192.168.1.2/24"}, Host{WolInterface: "lan", IP: "10.0.0.100"}, "192.168.1.255:9"},
-		{"explicit skips DNS", []string{"10.0.0.2/24"}, Host{WolInterface: "other", IP: "invalid.example"}, "10.0.0.255:9"},
-		{"skip without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, Host{SkipInterfaces: []string{"OTH"}}, "192.168.1.255:9"},
-		{"explicit excluded", []string{"10.0.0.2/24"}, Host{WolInterface: "other", SkipInterfaces: []string{"OTHER"}}, ""},
-		{"exact name", []string{"10.0.0.2/24"}, Host{WolInterface: "Other"}, ""},
-		{"no matching subnet", []string{"10.0.0.2/24"}, Host{IP: "192.168.1.100"}, ""},
-		{"longest prefix", []string{"10.0.0.2/16", "10.0.1.2/24"}, Host{IP: "10.0.1.100"}, "10.0.1.255:9"},
-		{"equal prefix ambiguous", []string{"10.0.0.2/24", "10.0.0.3/24"}, Host{IP: "10.0.0.100"}, ""},
-		{"IPv6 target", []string{"10.0.0.2/24"}, Host{IP: "2001:db8::1"}, ""},
-		{"link local excluded", []string{"169.254.1.2/16"}, Host{}, ""},
-		{"IPv6 interface", []string{"2001:db8::2/64"}, Host{}, ""},
-		{"no broadcast subnet", []string{"10.0.0.2/31"}, Host{}, ""},
-		{"no interfaces", nil, Host{}, ""},
+		{"single without IP", []string{"10.0.0.2/24"}, config.Host{}, "10.0.0.255:9"},
+		{"ambiguous without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{}, ""},
+		{"explicit without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{WolInterface: "lan"}, "192.168.1.255:9"},
+		{"explicit wins", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{WolInterface: "lan", IP: "10.0.0.100"}, "192.168.1.255:9"},
+		{"explicit skips DNS", []string{"10.0.0.2/24"}, config.Host{WolInterface: "other", IP: "invalid.example"}, "10.0.0.255:9"},
+		{"skip without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{SkipInterfaces: []string{"OTH"}}, "192.168.1.255:9"},
+		{"explicit excluded", []string{"10.0.0.2/24"}, config.Host{WolInterface: "other", SkipInterfaces: []string{"OTHER"}}, ""},
+		{"exact name", []string{"10.0.0.2/24"}, config.Host{WolInterface: "Other"}, ""},
+		{"no matching subnet", []string{"10.0.0.2/24"}, config.Host{IP: "192.168.1.100"}, ""},
+		{"longest prefix", []string{"10.0.0.2/16", "10.0.1.2/24"}, config.Host{IP: "10.0.1.100"}, "10.0.1.255:9"},
+		{"equal prefix ambiguous", []string{"10.0.0.2/24", "10.0.0.3/24"}, config.Host{IP: "10.0.0.100"}, ""},
+		{"IPv6 target", []string{"10.0.0.2/24"}, config.Host{IP: "2001:db8::1"}, ""},
+		{"link local excluded", []string{"169.254.1.2/16"}, config.Host{}, ""},
+		{"IPv6 interface", []string{"2001:db8::2/64"}, config.Host{}, ""},
+		{"no broadcast subnet", []string{"10.0.0.2/31"}, config.Host{}, ""},
+		{"no interfaces", nil, config.Host{}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,7 +113,7 @@ func TestWolErrors(t *testing.T) {
 	for _, operation := range []string{"interfaces", "addresses", "lookup", "send"} {
 		t.Run(operation, func(t *testing.T) {
 			network := fakeWolNetwork(t, "10.0.0.2/24")
-			host := Host{MAC: "00:11:22:33:44:55", IP: "10.0.0.100"}
+			host := config.Host{MAC: "00:11:22:33:44:55", IP: "10.0.0.100"}
 			switch operation {
 			case "interfaces":
 				network.interfaces = func() ([]net.Interface, error) { return nil, sentinel }
@@ -135,7 +136,7 @@ func TestWolErrors(t *testing.T) {
 		})
 	}
 	for _, mac := range []string{"invalid", "00:11:22:33:44:55:66:77"} {
-		if err := sendWol(&Host{MAC: mac}, wolNetwork{}); err == nil {
+		if err := sendWol(&config.Host{MAC: mac}, wolNetwork{}); err == nil {
 			t.Errorf("accepted MAC %s", mac)
 		}
 	}
@@ -154,7 +155,7 @@ func TestWolHostnameAndMultipleSubnets(t *testing.T) {
 				}
 				return []net.IP{net.ParseIP("10.0.1.100"), net.ParseIP("10.0.1.101")}, nil
 			}
-			local, remote, err := selectWolNetwork(&Host{WolInterface: "other", IP: target}, network)
+			local, remote, err := selectWolNetwork(&config.Host{WolInterface: "other", IP: target}, network)
 			if target == "" || target == "unmatched.example" {
 				if err == nil {
 					t.Fatal("expected ambiguous or unmatched network error")
@@ -175,14 +176,14 @@ func TestWolInterfaceFlags(t *testing.T) {
 	for _, flags := range []net.Flags{net.FlagBroadcast, net.FlagUp, net.FlagUp | net.FlagBroadcast | net.FlagLoopback} {
 		network := fakeWolNetwork(t, "10.0.0.2/24")
 		network.interfaces = func() ([]net.Interface, error) { return []net.Interface{{Name: "other", Flags: flags}}, nil }
-		if _, _, err := selectWolNetwork(&Host{}, network); err == nil {
+		if _, _, err := selectWolNetwork(&config.Host{}, network); err == nil {
 			t.Errorf("accepted flags %v", flags)
 		}
 	}
 }
 
 func TestWolInterfaceConfigurationWithoutIP(t *testing.T) {
-	hosts, err := parseHosts([]byte("- id: test\n  name: Test\n  mac: '00:11:22:33:44:55'\n  wol_interface: lan\n  skip_interfaces: [other]\n"))
+	hosts, err := config.ParseHosts([]byte("- id: test\n  name: Test\n  mac: '00:11:22:33:44:55'\n  wol_interface: lan\n  skip_interfaces: [other]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
