@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"net/http"
@@ -6,7 +6,7 @@ import (
 )
 
 func TestNewHTTPServerConfiguresTimeouts(t *testing.T) {
-	server := newHTTPServer(http.NotFoundHandler(), "127.0.0.1:7500")
+	server := NewHTTPServer(http.NotFoundHandler(), "127.0.0.1:7500")
 
 	if server.ReadHeaderTimeout <= 0 {
 		t.Error("ReadHeaderTimeout must be configured")

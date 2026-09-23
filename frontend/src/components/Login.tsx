@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, Mail, KeyRound, Loader2, Zap, UserPlus } from 'lucide-react';
-import { login, checkSetup, type User } from '../services/api';
+import { login, checkSetup } from '../services/api';
+import type { SessionUser } from '../services/types';
+import { getErrorMessage } from '../utils/errorMessage';
 
 const minimumPasswordLength = 12;
 const maximumPasswordLength = 72;
 
-const getErrorMessage = (error: unknown): string | undefined =>
-  error instanceof Error ? error.message : undefined;
-
 interface LoginProps {
-  onLoginSuccess: (user: User) => void;
+  onLoginSuccess: (user: SessionUser) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {

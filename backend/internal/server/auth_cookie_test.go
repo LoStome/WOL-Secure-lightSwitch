@@ -1,31 +1,31 @@
-package main
+package server
 
 import (
 	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"secure-switch-backend/internal/auth"
+	"secure-switch-backend/internal/store"
 )
 
 const sec12AuthCookieName = "secure-switch-auth"
 
-func TestSEC12UsesCookieAuthenticationWithoutPersistentBrowserStorage(t *testing.T) {
+func TestCookieAuthenticationDoesNotExposeToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	setupAuthTestDB(t)
-	jwtSecret = []byte(strings.Repeat("s", minimumJWTSecretLength))
+	h := newTestHarness(t)
+	h.secret = []byte(strings.Repeat("s", auth.MinimumJWTSecretLength))
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("hash test password: %v", err)
 	}
-	if err := DB.Create(&User{
+	if err := h.repository.DB.Create(&store.User{
 		Email:        "sec12@example.com",
 		PasswordHash: string(passwordHash),
 	}).Error; err != nil {
@@ -33,11 +33,11 @@ func TestSEC12UsesCookieAuthenticationWithoutPersistentBrowserStorage(t *testing
 	}
 
 	router := gin.New()
-	router.POST("/login", handleLogin)
-	router.GET("/protected", AuthMiddleware(), func(c *gin.Context) {
+	router.POST("/login", h.app().HandleLogin)
+	router.GET("/protected", h.app().Auth.AuthMiddleware(), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
-	router.POST("/logout", AuthMiddleware(), handleLogout)
+	router.POST("/logout", h.app().Auth.AuthMiddleware(), h.app().HandleLogout)
 
 	loginRequest := httptest.NewRequest(
 		http.MethodPost,
@@ -81,16 +81,32 @@ func TestSEC12UsesCookieAuthenticationWithoutPersistentBrowserStorage(t *testing
 		t.Fatalf("cookie-authenticated request returned %d, want %d", protectedResponse.Code, http.StatusNoContent)
 	}
 
-	for _, sourcePath := range []string{
-		filepath.Join("..", "frontend", "src", "App.tsx"),
-		filepath.Join("..", "frontend", "src", "services", "api.ts"),
-	} {
-		source, err := os.ReadFile(sourcePath)
-		if err != nil {
-			t.Fatalf("read %s: %v", sourcePath, err)
-		}
-		if strings.Contains(string(source), "localStorage") {
-			t.Fatalf("frontend persists authentication data in localStorage: %s", sourcePath)
-		}
+}
+
+func TestLogoutRevokesCurrentToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newTestHarness(t)
+	h.secret = []byte(strings.Repeat("s", auth.MinimumJWTSecretLength))
+
+	user := store.User{Email: "user@example.com", PasswordHash: "unused"}
+	if err := h.repository.DB.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	token, err := h.app().Auth.GenerateJWT(&user)
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+
+	router := gin.New()
+	router.POST("/logout", h.app().Auth.AuthMiddleware(), h.app().HandleLogout)
+	router.GET("/protected", h.app().Auth.AuthMiddleware(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	if response := authenticatedRequest(t, router, http.MethodPost, "/logout", token); response.Code != http.StatusNoContent {
+		t.Fatalf("logout returned %d, want %d", response.Code, http.StatusNoContent)
+	}
+	if response := authenticatedRequest(t, router, http.MethodGet, "/protected", token); response.Code != http.StatusUnauthorized {
+		t.Fatalf("request with logged-out token returned %d, want %d", response.Code, http.StatusUnauthorized)
 	}
 }

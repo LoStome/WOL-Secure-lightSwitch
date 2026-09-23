@@ -3,11 +3,11 @@ import DeviceList from './components/DeviceList';
 import Login from './components/Login';
 import AdminPanel from './components/AdminPanel'; 
 import { Zap, LogOut, Shield } from 'lucide-react';
-import { getCurrentUser, logout, type User } from './services/api';
+import { getCurrentUser, logout } from './services/api';
+import type { SessionUser } from './services/types';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
 
@@ -19,12 +19,10 @@ function App() {
         const user = await getCurrentUser();
         if (!cancelled) {
           setCurrentUser(user);
-          setIsAuthenticated(true);
         }
       } catch {
         if (!cancelled) {
           setCurrentUser(null);
-          setIsAuthenticated(false);
         }
       } finally {
         if (!cancelled) {
@@ -39,9 +37,8 @@ function App() {
     };
   }, []);
 
-  const handleLoginSuccess = (user: User) => {
+  const handleLoginSuccess = (user: SessionUser) => {
     setCurrentUser(user);
-    setIsAuthenticated(true);
   };
 
   const handleLogout = async () => {
@@ -51,10 +48,11 @@ function App() {
       // Local logout must still succeed if the session is already invalid or unreachable.
     } finally {
       setCurrentUser(null);
-      setIsAuthenticated(false);
       setShowAdmin(false);
     }
   };
+
+  const isAuthenticated = currentUser !== null;
 
   if (isInitializing) {
     return <div className="min-h-screen bg-zinc-950" />;

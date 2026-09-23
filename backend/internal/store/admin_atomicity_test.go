@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"errors"
@@ -10,28 +10,24 @@ import (
 	"gorm.io/gorm"
 )
 
-func setupConcurrentTestDB(t *testing.T) {
+func setupConcurrentTestDB(t *testing.T) *Store {
 	t.Helper()
 
-	previousDB := DB
 	databasePath := filepath.Join(t.TempDir(), "secure-switch.db")
-	var err error
-	DB, err = gorm.Open(sqlite.Open(sqliteDSN(databasePath)), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(SQLiteDSN(databasePath)), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
-	if err := DB.AutoMigrate(&User{}, &UserDevice{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &UserDevice{}); err != nil {
 		t.Fatalf("migrate test database: %v", err)
 	}
-	sqlDB, err := DB.DB()
+	sqlDB, err := db.DB()
 	if err != nil {
 		t.Fatalf("get database handle: %v", err)
 	}
 	sqlDB.SetMaxOpenConns(16)
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-		DB = previousDB
-	})
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	return &Store{DB: db}
 }
 
 func runConcurrently(count int, operation func(index int) error) []error {
@@ -52,10 +48,10 @@ func runConcurrently(count int, operation func(index int) error) []error {
 }
 
 func TestCreateInitialAdminIsAtomic(t *testing.T) {
-	setupConcurrentTestDB(t)
+	repository := setupConcurrentTestDB(t)
 
 	operationErrors := runConcurrently(12, func(index int) error {
-		return CreateInitialAdmin(
+		return repository.CreateInitialAdmin(
 			"admin"+string(rune('a'+index))+"@example.com",
 			"unused-password-hash",
 		)
@@ -75,7 +71,7 @@ func TestCreateInitialAdminIsAtomic(t *testing.T) {
 		t.Fatalf("successful initial admin creations = %d, want 1", successes)
 	}
 
-	adminCount, err := GetAdminCount()
+	adminCount, err := repository.GetAdminCount()
 	if err != nil {
 		t.Fatalf("count administrators: %v", err)
 	}
@@ -85,36 +81,36 @@ func TestCreateInitialAdminIsAtomic(t *testing.T) {
 }
 
 func TestConcurrentAdminDemotionPreservesOneAdmin(t *testing.T) {
-	setupConcurrentTestDB(t)
-	admins := createTestAdmins(t)
+	repository := setupConcurrentTestDB(t)
+	admins := createTestAdmins(t, repository)
 	demote := false
 
 	operationErrors := runConcurrently(len(admins), func(index int) error {
-		return UpdateUser(admins[index].ID, nil, &demote, nil)
+		return repository.UpdateUser(admins[index].ID, nil, &demote, nil)
 	})
 	assertOneAdminOperationSucceeds(t, operationErrors)
-	assertAdminCount(t, 1)
+	assertAdminCount(t, repository, 1)
 }
 
 func TestConcurrentAdminDeletionPreservesOneAdmin(t *testing.T) {
-	setupConcurrentTestDB(t)
-	admins := createTestAdmins(t)
+	repository := setupConcurrentTestDB(t)
+	admins := createTestAdmins(t, repository)
 
 	operationErrors := runConcurrently(len(admins), func(index int) error {
-		return DeleteUser(admins[index].ID)
+		return repository.DeleteUser(admins[index].ID)
 	})
 	assertOneAdminOperationSucceeds(t, operationErrors)
-	assertAdminCount(t, 1)
+	assertAdminCount(t, repository, 1)
 }
 
-func createTestAdmins(t *testing.T) []User {
+func createTestAdmins(t *testing.T, repository *Store) []User {
 	t.Helper()
 	admins := []User{
 		{Email: "first-admin@example.com", PasswordHash: "unused", IsAdmin: true},
 		{Email: "second-admin@example.com", PasswordHash: "unused", IsAdmin: true},
 	}
 	for index := range admins {
-		if err := DB.Create(&admins[index]).Error; err != nil {
+		if err := repository.DB.Create(&admins[index]).Error; err != nil {
 			t.Fatalf("create administrator: %v", err)
 		}
 	}
@@ -140,9 +136,9 @@ func assertOneAdminOperationSucceeds(t *testing.T, operationErrors []error) {
 	}
 }
 
-func assertAdminCount(t *testing.T, want int64) {
+func assertAdminCount(t *testing.T, repository *Store, want int64) {
 	t.Helper()
-	adminCount, err := GetAdminCount()
+	adminCount, err := repository.GetAdminCount()
 	if err != nil {
 		t.Fatalf("count administrators: %v", err)
 	}

@@ -1,4 +1,4 @@
-package auth_test
+package server
 
 import (
 	"encoding/json"
@@ -13,11 +13,10 @@ import (
 	"secure-switch-backend/internal/auth"
 	"secure-switch-backend/internal/config"
 	"secure-switch-backend/internal/device"
-	"secure-switch-backend/internal/server"
 	"secure-switch-backend/internal/store"
 )
 
-func TestAdminMiddlewareProtectsRealEndpoints(t *testing.T) {
+func TestRouterRestrictsDevicesToUserAssignments(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	workDir := t.TempDir()
 	dataDir := filepath.Join(workDir, "data")
@@ -25,7 +24,9 @@ func TestAdminMiddlewareProtectsRealEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(workDir)
-	if err := os.WriteFile(filepath.Join(dataDir, "hosts.yaml"), []byte("- id: test-host\n  name: Test host\n  mac: AA:BB:CC:DD:EE:FF\n"), 0o600); err != nil {
+	hostsYAML := "- id: assigned-host\n  name: Assigned host\n  mac: AA:BB:CC:DD:EE:01\n" +
+		"- id: unassigned-host\n  name: Unassigned host\n  mac: AA:BB:CC:DD:EE:02\n"
+	if err := os.WriteFile(filepath.Join(dataDir, "hosts.yaml"), []byte(hostsYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -42,18 +43,24 @@ func TestAdminMiddlewareProtectsRealEndpoints(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
+	wakeCalls := make([]string, 0, 2)
+	shutdownCalls := make([]string, 0, 2)
 	authService := &auth.Service{
 		Secret: []byte(strings.Repeat("s", auth.MinimumJWTSecretLength)),
 		Users:  repository,
 	}
-	application := &server.App{
+	application := &App{
 		Config:  &config.Loader{},
 		Store:   repository,
 		Auth:    authService,
 		Limiter: auth.NewDefaultLoginAttemptLimiter(),
 		Monitor: device.NewMonitor(),
-		Wake:    func(*config.Host) error { return nil },
-		Shutdown: func(*config.Host) error {
+		Wake: func(host *config.Host) error {
+			wakeCalls = append(wakeCalls, host.ID)
+			return nil
+		},
+		Shutdown: func(host *config.Host) error {
+			shutdownCalls = append(shutdownCalls, host.ID)
 			return nil
 		},
 	}
@@ -102,7 +109,7 @@ func TestAdminMiddlewareProtectsRealEndpoints(t *testing.T) {
 	adminCookie := getAuthCookie(adminLogin)
 	createMember := request(http.MethodPost, "/api/users", map[string]any{
 		"email": "member@example.com", "password": "Strong-Member-Password-42!",
-		"is_admin": false,
+		"is_admin": false, "devices": []string{"assigned-host"},
 	}, adminCookie)
 	if createMember.Code != http.StatusCreated {
 		t.Fatalf("create member through admin API = %d %s, want %d", createMember.Code, createMember.Body.String(), http.StatusCreated)
@@ -115,20 +122,42 @@ func TestAdminMiddlewareProtectsRealEndpoints(t *testing.T) {
 	}
 	memberCookie := getAuthCookie(memberLogin)
 
-	for _, endpoint := range []struct {
+	hostResponse := request(http.MethodGet, "/api/hosts", nil, memberCookie)
+	if hostResponse.Code != http.StatusOK {
+		t.Fatalf("member hosts = %d %s, want %d", hostResponse.Code, hostResponse.Body.String(), http.StatusOK)
+	}
+	var hosts []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(hostResponse.Body.Bytes(), &hosts); err != nil {
+		t.Fatalf("decode member hosts: %v", err)
+	}
+	if len(hosts) != 1 || hosts[0].ID != "assigned-host" {
+		t.Fatalf("member hosts = %+v, want only assigned-host", hosts)
+	}
+
+	for _, action := range []struct {
 		name, path string
+		calls      *[]string
 	}{
-		{"users", "/api/users"},
-		{"login metrics", "/api/metrics/login"},
+		{"wol", "/api/wol", &wakeCalls},
+		{"shutdown", "/api/shutdown", &shutdownCalls},
 	} {
-		t.Run(endpoint.name, func(t *testing.T) {
-			memberResponse := request(http.MethodGet, endpoint.path, nil, memberCookie)
-			if memberResponse.Code != http.StatusForbidden {
-				t.Errorf("member GET %s = %d %s, want %d", endpoint.path, memberResponse.Code, memberResponse.Body.String(), http.StatusForbidden)
+		t.Run(action.name, func(t *testing.T) {
+			allowed := request(http.MethodPost, action.path+"/assigned-host", nil, memberCookie)
+			if allowed.Code != http.StatusOK {
+				t.Fatalf("assigned %s = %d %s, want %d", action.name, allowed.Code, allowed.Body.String(), http.StatusOK)
 			}
-			adminResponse := request(http.MethodGet, endpoint.path, nil, adminCookie)
-			if adminResponse.Code != http.StatusOK {
-				t.Errorf("admin GET %s = %d %s, want %d", endpoint.path, adminResponse.Code, adminResponse.Body.String(), http.StatusOK)
+			if len(*action.calls) != 1 || (*action.calls)[0] != "assigned-host" {
+				t.Fatalf("assigned %s calls = %v, want [assigned-host]", action.name, *action.calls)
+			}
+
+			denied := request(http.MethodPost, action.path+"/unassigned-host", nil, memberCookie)
+			if denied.Code != http.StatusForbidden {
+				t.Errorf("unassigned %s = %d %s, want %d", action.name, denied.Code, denied.Body.String(), http.StatusForbidden)
+			}
+			if len(*action.calls) != 1 {
+				t.Errorf("unassigned %s invoked action stub; calls = %v", action.name, *action.calls)
 			}
 		})
 	}

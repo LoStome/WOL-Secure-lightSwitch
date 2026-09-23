@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"net/http"
@@ -6,9 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
 )
 
 func TestHealthzChecksConfigurationAndDatabase(t *testing.T) {
@@ -25,22 +22,13 @@ func TestHealthzChecksConfigurationAndDatabase(t *testing.T) {
 		t.Fatalf("write test config: %v", err)
 	}
 
-	previousDB := DB
-	var err error
-	DB, err = gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	sqlDB, err := DB.DB()
+	h := newTestHarness(t)
+	sqlDB, err := h.repository.DB.DB()
 	if err != nil {
 		t.Fatalf("get test database handle: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-		DB = previousDB
-	})
 
-	router, err := newRouter(nil)
+	router, err := h.router(nil)
 	if err != nil {
 		t.Fatalf("create router: %v", err)
 	}
@@ -64,7 +52,7 @@ func TestHealthzChecksConfigurationAndDatabase(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable || response.Body.Len() != 0 {
 		t.Fatalf("invalid config response = %d %q, want 503 with no body", response.Code, response.Body.String())
 	}
-	if hosts, err := LoadHosts(); err != nil || len(hosts) != 1 || hosts[0].ID != "test-host" {
+	if hosts, err := h.loader.LoadHosts(); err != nil || len(hosts) != 1 || hosts[0].ID != "test-host" {
 		t.Fatalf("hosts during invalid config = %+v, err = %v; want last valid host", hosts, err)
 	}
 

@@ -5,9 +5,10 @@ import (
 	"context"
 	"errors"
 	"net"
-	"secure-switch-backend/internal/config"
 	"testing"
 	"time"
+
+	"secure-switch-backend/internal/config"
 )
 
 func fakeWolNetwork(t *testing.T, addresses ...string) wolNetwork {
@@ -32,79 +33,74 @@ func fakeWolNetwork(t *testing.T, addresses ...string) wolNetwork {
 	}
 }
 
+type wolSelectionCase struct {
+	name      string
+	addresses []string
+	host      config.Host
+	want      string
+}
+
+var wolSelectionCases = []wolSelectionCase{
+	{"device network", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{IP: "192.168.1.100"}, "192.168.1.255:9"},
+	{"single without IP", []string{"10.0.0.2/24"}, config.Host{}, "10.0.0.255:9"},
+	{"ambiguous without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{}, ""},
+	{"explicit without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{WolInterface: "lan"}, "192.168.1.255:9"},
+	{"explicit wins", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{WolInterface: "lan", IP: "10.0.0.100"}, "192.168.1.255:9"},
+	{"explicit skips DNS", []string{"10.0.0.2/24"}, config.Host{WolInterface: "other", IP: "invalid.example"}, "10.0.0.255:9"},
+	{"skip without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{SkipInterfaces: []string{"OTH"}}, "192.168.1.255:9"},
+	{"explicit excluded", []string{"10.0.0.2/24"}, config.Host{WolInterface: "other", SkipInterfaces: []string{"OTHER"}}, ""},
+	{"exact name", []string{"10.0.0.2/24"}, config.Host{WolInterface: "Other"}, ""},
+	{"no matching subnet", []string{"10.0.0.2/24"}, config.Host{IP: "192.168.1.100"}, ""},
+	{"longest prefix", []string{"10.0.0.2/16", "10.0.1.2/24"}, config.Host{IP: "10.0.1.100"}, "10.0.1.255:9"},
+	{"equal prefix ambiguous", []string{"10.0.0.2/24", "10.0.0.3/24"}, config.Host{IP: "10.0.0.100"}, ""},
+	{"IPv6 target", []string{"10.0.0.2/24"}, config.Host{IP: "2001:db8::1"}, ""},
+	{"link local excluded", []string{"169.254.1.2/16"}, config.Host{}, ""},
+	{"IPv6 interface", []string{"2001:db8::2/64"}, config.Host{}, ""},
+	{"no broadcast subnet", []string{"10.0.0.2/31"}, config.Host{}, ""},
+	{"no interfaces", nil, config.Host{}, ""},
+}
+
 func TestWolSelectsDeviceNetwork(t *testing.T) {
-	network := fakeWolNetwork(t, "10.0.0.2/24", "192.168.1.2/24")
-	sent := false
-	network.send = func(local, remote *net.UDPAddr, packet []byte) error {
-		sent = true
-		if remote.String() != "192.168.1.255:9" {
-			t.Errorf("destination = %s, want 192.168.1.255:9", remote)
-		}
-		if local == nil || !local.IP.Equal(net.ParseIP("192.168.1.2")) {
-			t.Errorf("source = %v, want 192.168.1.2", local)
-		}
-		return nil
-	}
-	if err := sendWol(&config.Host{MAC: "00:11:22:33:44:55", IP: "192.168.1.100"}, network); err != nil {
-		t.Fatal(err)
-	}
-	if !sent {
-		t.Fatal("packet not sent")
-	}
+	checkWolSelection(t, wolSelectionCases[0])
 }
 
 func TestWolSelectionAndPacket(t *testing.T) {
-	cases := []struct {
-		name      string
-		addresses []string
-		host      config.Host
-		want      string
-	}{
-		{"single without IP", []string{"10.0.0.2/24"}, config.Host{}, "10.0.0.255:9"},
-		{"ambiguous without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{}, ""},
-		{"explicit without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{WolInterface: "lan"}, "192.168.1.255:9"},
-		{"explicit wins", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{WolInterface: "lan", IP: "10.0.0.100"}, "192.168.1.255:9"},
-		{"explicit skips DNS", []string{"10.0.0.2/24"}, config.Host{WolInterface: "other", IP: "invalid.example"}, "10.0.0.255:9"},
-		{"skip without IP", []string{"10.0.0.2/24", "192.168.1.2/24"}, config.Host{SkipInterfaces: []string{"OTH"}}, "192.168.1.255:9"},
-		{"explicit excluded", []string{"10.0.0.2/24"}, config.Host{WolInterface: "other", SkipInterfaces: []string{"OTHER"}}, ""},
-		{"exact name", []string{"10.0.0.2/24"}, config.Host{WolInterface: "Other"}, ""},
-		{"no matching subnet", []string{"10.0.0.2/24"}, config.Host{IP: "192.168.1.100"}, ""},
-		{"longest prefix", []string{"10.0.0.2/16", "10.0.1.2/24"}, config.Host{IP: "10.0.1.100"}, "10.0.1.255:9"},
-		{"equal prefix ambiguous", []string{"10.0.0.2/24", "10.0.0.3/24"}, config.Host{IP: "10.0.0.100"}, ""},
-		{"IPv6 target", []string{"10.0.0.2/24"}, config.Host{IP: "2001:db8::1"}, ""},
-		{"link local excluded", []string{"169.254.1.2/16"}, config.Host{}, ""},
-		{"IPv6 interface", []string{"2001:db8::2/64"}, config.Host{}, ""},
-		{"no broadcast subnet", []string{"10.0.0.2/31"}, config.Host{}, ""},
-		{"no interfaces", nil, config.Host{}, ""},
-	}
-	for _, tc := range cases {
+	for _, tc := range wolSelectionCases[1:] {
 		t.Run(tc.name, func(t *testing.T) {
-			network := fakeWolNetwork(t, tc.addresses...)
-			sent := false
-			network.send = func(local, remote *net.UDPAddr, packet []byte) error {
-				sent = true
-				if remote.String() != tc.want {
-					t.Errorf("destination = %s, want %s", remote, tc.want)
-				}
-				if local == nil || local.IP.To4() == nil || local.Port != 0 {
-					t.Errorf("invalid local address: %v", local)
-				}
-				expected := append(bytes.Repeat([]byte{0xff}, 6), bytes.Repeat([]byte{0, 17, 34, 51, 68, 85}, 16)...)
-				if !bytes.Equal(packet, expected) {
-					t.Errorf("invalid magic packet: %x", packet)
-				}
-				return nil
-			}
-			tc.host.MAC = "00:11:22:33:44:55"
-			err := sendWol(&tc.host, network)
-			if tc.want == "" {
-				if err == nil || sent {
-					t.Fatalf("expected error without sending, got %v, sent %v", err, sent)
-				}
-			} else if err != nil || !sent {
-				t.Fatalf("err=%v sent=%v", err, sent)
-			}
+			checkWolSelection(t, tc)
 		})
+	}
+}
+
+func checkWolSelection(t *testing.T, tc wolSelectionCase) {
+	t.Helper()
+	network := fakeWolNetwork(t, tc.addresses...)
+	sent := false
+	network.send = func(local, remote *net.UDPAddr, packet []byte) error {
+		sent = true
+		if remote.String() != tc.want {
+			t.Errorf("destination = %s, want %s", remote, tc.want)
+		}
+		if local == nil || local.IP.To4() == nil || local.Port != 0 {
+			t.Errorf("invalid local address: %v", local)
+		}
+		if tc.name == "device network" && (local == nil || !local.IP.Equal(net.ParseIP("192.168.1.2"))) {
+			t.Errorf("source = %v, want 192.168.1.2", local)
+		}
+		expected := append(bytes.Repeat([]byte{0xff}, 6), bytes.Repeat([]byte{0, 17, 34, 51, 68, 85}, 16)...)
+		if !bytes.Equal(packet, expected) {
+			t.Errorf("invalid magic packet: %x", packet)
+		}
+		return nil
+	}
+	tc.host.MAC = "00:11:22:33:44:55"
+	err := sendWol(&tc.host, network)
+	if tc.want == "" {
+		if err == nil || sent {
+			t.Fatalf("expected error without sending, got %v, sent %v", err, sent)
+		}
+	} else if err != nil || !sent {
+		t.Fatalf("err=%v sent=%v", err, sent)
 	}
 }
 

@@ -1,18 +1,5 @@
-export interface Host {
-  ID: string;
-  Name: string;
-  MAC: string;
-  IP: string;
-  online: boolean;
-  last_pinged: string;
-}
-
-export interface User {
-  id: number;
-  email: string;
-  is_admin: boolean;
-  devices: { id: number; user_id: number; device_id: string }[];
-}
+import type { Host, SessionUser, AdminUser } from './types';
+export type { Host, SessionUser, AdminUser } from './types';
 
 export type ApiErrorKind = 'http' | 'network' | 'timeout' | 'invalid-response';
 
@@ -152,7 +139,7 @@ const request = async <T>(
   }
 };
 
-export const login = async (email: string, password: string): Promise<{ user: User }> => {
+export const login = async (email: string, password: string): Promise<{ user: SessionUser }> => {
   return request(`${API_BASE}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -160,7 +147,7 @@ export const login = async (email: string, password: string): Promise<{ user: Us
   });
 };
 
-export const getCurrentUser = async (): Promise<User> => {
+export const getCurrentUser = async (): Promise<SessionUser> => {
   return request(`${API_BASE}/session`);
 };
 
@@ -193,7 +180,7 @@ export const shutdownHost = async (id: string): Promise<void> => {
   }, { parseJson: false, reloadOnUnauthorized: true });
 };
 
-export const fetchUsers = async (): Promise<User[]> => {
+export const fetchUsers = async (): Promise<AdminUser[]> => {
   return request(`${API_BASE}/users`, { headers: getHeaders() }, { reloadOnUnauthorized: true });
 };
 
