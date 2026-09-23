@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -302,5 +303,117 @@ func TestRemoteShutdownReturnsCommandError(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), command) || strings.Contains(err.Error(), "remote-secret") {
 		t.Fatalf("command error exposed sensitive details: %v", err)
+	}
+}
+
+func testSSHShutdownEndpoint(t *testing.T, signer ssh.Signer) (net.Listener, *Host) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	knownHostsPath := filepath.Join(t.TempDir(), "known_hosts")
+	line := knownhosts.Line([]string{listener.Addr().String()}, signer.PublicKey()) + "\n"
+	if err := os.WriteFile(knownHostsPath, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_KNOWN_HOSTS_FILE", knownHostsPath)
+	passwordPath := filepath.Join(t.TempDir(), "ssh_password")
+	if err := os.WriteFile(passwordPath, []byte("test-password\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return listener, &Host{IP: "127.0.0.1", User: "test", PasswordFile: passwordPath, Cmd: "test-command"}
+}
+
+func TestRemoteShutdownHandshakeTimeout(t *testing.T) {
+	signer := testSSHSigner(t)
+	listener, host := testSSHShutdownEndpoint(t, signer)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(8 * time.Second))
+		io.Copy(io.Discard, conn) // Accept TCP but never send an SSH banner.
+	}()
+	t.Cleanup(func() {
+		listener.Close()
+		<-done
+	})
+
+	start := time.Now()
+	err := remoteShutdown(host, listener.Addr().String())
+	if err == nil || err.Error() != "SSH operation timed out" || time.Since(start) > 7*time.Second {
+		t.Fatalf("stalled SSH handshake: err=%v, elapsed=%v; want timeout within 7s", err, time.Since(start))
+	}
+}
+
+func TestRemoteShutdownCommandTimeoutAndOutputLimit(t *testing.T) {
+	for _, scenario := range []string{"stalled command", "excessive output"} {
+		t.Run(scenario, func(t *testing.T) {
+			signer := testSSHSigner(t)
+			listener, host := testSSHShutdownEndpoint(t, signer)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				conn.SetDeadline(time.Now().Add(8 * time.Second))
+				config := &ssh.ServerConfig{PasswordCallback: func(ssh.ConnMetadata, []byte) (*ssh.Permissions, error) { return nil, nil }}
+				config.AddHostKey(signer)
+				server, channels, requests, err := ssh.NewServerConn(conn, config)
+				if err != nil {
+					return
+				}
+				defer server.Close()
+				go ssh.DiscardRequests(requests)
+				for newChannel := range channels {
+					channel, channelRequests, err := newChannel.Accept()
+					if err != nil {
+						return
+					}
+					for request := range channelRequests {
+						if request.Type != "exec" {
+							request.Reply(false, nil)
+							continue
+						}
+						request.Reply(true, nil)
+						if scenario == "stalled command" {
+							server.Wait()
+						} else {
+							_, _ = channel.Write(make([]byte, 128*1024))
+							channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+						}
+						channel.Close()
+						return
+					}
+				}
+			}()
+			t.Cleanup(func() {
+				listener.Close()
+				<-done
+			})
+
+			start := time.Now()
+			err := remoteShutdown(host, listener.Addr().String())
+			wantError := "SSH operation timed out"
+			if scenario == "excessive output" {
+				wantError = "SSH output limit exceeded"
+			}
+			if err == nil || err.Error() != wantError {
+				t.Fatalf("shutdown error = %v, want %q", err, wantError)
+			}
+			if scenario == "stalled command" && time.Since(start) > 7*time.Second {
+				t.Fatalf("stalled command took %v; want timeout within 7s", time.Since(start))
+			}
+		})
 	}
 }

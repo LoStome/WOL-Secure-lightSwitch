@@ -1,15 +1,45 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+const sshOperationTimeout = 5 * time.Second
+const sshOutputLimit = 64 * 1024
+
+type sshOutputCounter struct {
+	mu       sync.Mutex
+	bytes    int
+	exceeded bool
+}
+
+func (o *sshOutputCounter) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(p) > sshOutputLimit-o.bytes {
+		o.exceeded = true
+		o.bytes = sshOutputLimit
+	} else {
+		o.bytes += len(p)
+	}
+	return len(p), nil
+}
+
+func (o *sshOutputCounter) Exceeded() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.exceeded
+}
 
 func RemoteShutdown(h *Host) error {
 	return remoteShutdown(h, h.IP+":22")
@@ -75,24 +105,53 @@ func remoteShutdown(h *Host, address string) error {
 		User:            user,
 		Auth:            authMethods,
 		HostKeyCallback: hostKeyCallback,
-		Timeout:         5 * time.Second,
 	}
 
-	//Connection to the SSH server
-	client, err := ssh.Dial("tcp", address, config)
+	ctx, cancel := context.WithTimeout(context.Background(), sshOperationTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return errors.New("SSH operation timed out")
+		}
 		return errors.New("SSH connection failed")
 	}
+	defer conn.Close()
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return errors.New("SSH connection deadline failed")
+	}
+	sshConn, channels, requests, err := ssh.NewClientConn(conn, address, config)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return errors.New("SSH operation timed out")
+		}
+		return errors.New("SSH connection failed")
+	}
+	client := ssh.NewClient(sshConn, channels, requests)
 	defer client.Close()
 
 	session, err := client.NewSession()
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return errors.New("SSH operation timed out")
+		}
 		return errors.New("SSH session failed")
 	}
 	defer session.Close()
 
-	// Execute the shutdown command without logging command arguments or remote output.
-	if _, err := session.CombinedOutput(command); err != nil {
+	// Count output without retaining remote data or letting it grow in memory.
+	output := &sshOutputCounter{}
+	session.Stdout = output
+	session.Stderr = output
+	err = session.Run(command)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return errors.New("SSH operation timed out")
+	}
+	if output.Exceeded() {
+		return errors.New("SSH output limit exceeded")
+	}
+	if err != nil {
 		return fmt.Errorf("SSH command failed: %w", err)
 	}
 
