@@ -64,8 +64,8 @@ export const checkSetup = async (): Promise<{needs_setup: boolean}> => {
   return response.json();
 }
 
-export const fetchHosts = async (): Promise<Host[]> => {
-  const response = await fetch(`${API_BASE}/hosts`, { headers: getHeaders() });
+export const fetchHosts = async (signal?: AbortSignal): Promise<Host[]> => {
+  const response = await fetch(`${API_BASE}/hosts`, { headers: getHeaders(), signal });
   if (!response.ok) {
     handleAuthError(response);
     throw new Error('Failed to fetch hosts');

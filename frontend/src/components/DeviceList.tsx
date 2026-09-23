@@ -3,35 +3,20 @@ import DeviceCard from './DeviceCard';
 import { fetchHosts } from '../services/api';
 import type { Host } from '../services/api';
 import { PowerOff } from 'lucide-react'; // use an icon for empty state
+import { startHostPolling, type HostPollingState } from './hostPolling';
 
 const DeviceList: React.FC = () => {
-  const [hosts, setHosts] = useState<Host[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [pollingState, setPollingState] = useState<HostPollingState<Host>>({
+    hosts: [],
+    loading: true,
+    error: null,
+  });
 
   useEffect(() => {
-    let intervalId: ReturnType<typeof setInterval>;
-
-    const loadHosts = async () => {
-      try {
-        const data = await fetchHosts();
-        setHosts(data || []);
-      } catch (err: any) {
-        setError(err.message || 'Error fetching hosts');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadHosts();
-    
-    // Poll every 10 seconds
-    intervalId = setInterval(loadHosts, 10000);
-
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
+    return startHostPolling(fetchHosts, setPollingState);
   }, []);
+
+  const { hosts, loading, error } = pollingState;
 
   if (loading) {
     return (
