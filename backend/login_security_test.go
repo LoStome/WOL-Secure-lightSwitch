@@ -23,20 +23,20 @@ func TestLoginLimiterKeysByAccountAndIP(t *testing.T) {
 
 	t.Run("account across IP addresses", func(t *testing.T) {
 		limiter := newTestLoginLimiter(2, 100, time.Minute, time.Minute)
-		limiter.recordFailure("192.0.2.1", "victim@example.com", now)
-		limiter.recordFailure("192.0.2.2", "victim@example.com", now)
+		limiter.RecordFailure("192.0.2.1", "victim@example.com", now)
+		limiter.RecordFailure("192.0.2.2", "victim@example.com", now)
 
-		if got := limiter.retryAfter("192.0.2.3", "victim@example.com", now); got != time.Minute {
+		if got := limiter.RetryAfter("192.0.2.3", "victim@example.com", now); got != time.Minute {
 			t.Fatalf("account retryAfter = %v, want %v", got, time.Minute)
 		}
 	})
 
 	t.Run("IP across accounts", func(t *testing.T) {
 		limiter := newTestLoginLimiter(2, 100, time.Minute, time.Minute)
-		limiter.recordFailure("192.0.2.1", "first@example.com", now)
-		limiter.recordFailure("192.0.2.1", "second@example.com", now)
+		limiter.RecordFailure("192.0.2.1", "first@example.com", now)
+		limiter.RecordFailure("192.0.2.1", "second@example.com", now)
 
-		if got := limiter.retryAfter("192.0.2.1", "third@example.com", now); got != time.Minute {
+		if got := limiter.RetryAfter("192.0.2.1", "third@example.com", now); got != time.Minute {
 			t.Fatalf("IP retryAfter = %v, want %v", got, time.Minute)
 		}
 	})
@@ -47,23 +47,23 @@ func TestLoginLimiterResetAndExpiration(t *testing.T) {
 
 	t.Run("successful login clears keys", func(t *testing.T) {
 		limiter := newTestLoginLimiter(1, 100, time.Minute, time.Minute)
-		limiter.recordFailure("192.0.2.1", "user@example.com", now)
-		limiter.recordSuccess("192.0.2.1", "user@example.com")
+		limiter.RecordFailure("192.0.2.1", "user@example.com", now)
+		limiter.RecordSuccess("192.0.2.1", "user@example.com")
 
-		if got := limiter.retryAfter("192.0.2.1", "user@example.com", now); got != 0 {
+		if got := limiter.RetryAfter("192.0.2.1", "user@example.com", now); got != 0 {
 			t.Fatalf("retryAfter after success = %v, want 0", got)
 		}
-		if got := limiter.metrics().TrackedKeys; got != 0 {
+		if got := limiter.Metrics().TrackedKeys; got != 0 {
 			t.Fatalf("tracked keys after success = %d, want 0", got)
 		}
 	})
 
 	t.Run("global cleanup removes expired keys", func(t *testing.T) {
 		limiter := newTestLoginLimiter(1, 100, 10*time.Second, time.Second)
-		limiter.recordFailure("192.0.2.1", "user@example.com", now)
+		limiter.RecordFailure("192.0.2.1", "user@example.com", now)
 
-		limiter.retryAfter("192.0.2.99", "other@example.com", now.Add(11*time.Second))
-		if got := limiter.metrics().TrackedKeys; got != 0 {
+		limiter.RetryAfter("192.0.2.99", "other@example.com", now.Add(11*time.Second))
+		if got := limiter.Metrics().TrackedKeys; got != 0 {
 			t.Fatalf("tracked keys after expiration = %d, want 0", got)
 		}
 	})
@@ -74,14 +74,14 @@ func TestLoginLimiterBoundsTrackedKeys(t *testing.T) {
 	limiter := newTestLoginLimiter(5, loginMaxTrackedKeys, time.Hour, time.Minute)
 
 	for index := 0; index < 6_000; index++ {
-		limiter.recordFailure(
+		limiter.RecordFailure(
 			fmt.Sprintf("client-%d", index),
 			fmt.Sprintf("user-%d@example.com", index),
 			now,
 		)
 	}
 
-	metrics := limiter.metrics()
+	metrics := limiter.Metrics()
 	if metrics.TrackedKeys != loginMaxTrackedKeys {
 		t.Fatalf("tracked keys = %d, want %d", metrics.TrackedKeys, loginMaxTrackedKeys)
 	}
@@ -93,10 +93,10 @@ func TestLoginLimiterBoundsTrackedKeys(t *testing.T) {
 func TestLoginLimiterMetrics(t *testing.T) {
 	now := time.Date(2026, time.September, 22, 12, 0, 0, 0, time.UTC)
 	limiter := newTestLoginLimiter(1, 100, time.Minute, time.Minute)
-	limiter.recordFailure("192.0.2.1", "user@example.com", now)
-	limiter.recordRateLimited()
+	limiter.RecordFailure("192.0.2.1", "user@example.com", now)
+	limiter.RecordRateLimited()
 
-	metrics := limiter.metrics()
+	metrics := limiter.Metrics()
 	if metrics.FailedAttemptsTotal != 1 || metrics.RateLimitedAttemptsTotal != 1 {
 		t.Fatalf("metrics = %+v, want one failure and one rate-limited attempt", metrics)
 	}
@@ -154,8 +154,8 @@ func TestLoginMetricsEndpointRequiresAdministrator(t *testing.T) {
 
 	previousLimiter := loginLimiter
 	loginLimiter = newTestLoginLimiter(1, 100, time.Minute, time.Minute)
-	loginLimiter.recordFailure("192.0.2.1", "user@example.com", time.Now())
-	loginLimiter.recordRateLimited()
+	loginLimiter.RecordFailure("192.0.2.1", "user@example.com", time.Now())
+	loginLimiter.RecordRateLimited()
 	t.Cleanup(func() { loginLimiter = previousLimiter })
 
 	router, err := newRouter(nil)

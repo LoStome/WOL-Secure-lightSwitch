@@ -147,8 +147,8 @@ func handleLogin(c *gin.Context) {
 	req.Email = email
 
 	clientIP := c.ClientIP()
-	if retryAfter := loginLimiter.retryAfter(clientIP, req.Email, time.Now()); retryAfter > 0 {
-		loginLimiter.recordRateLimited()
+	if retryAfter := loginLimiter.RetryAfter(clientIP, req.Email, time.Now()); retryAfter > 0 {
+		loginLimiter.RecordRateLimited()
 		c.Header("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many login attempts; try again later"})
 		return
@@ -171,7 +171,7 @@ func handleLogin(c *gin.Context) {
 			err = CreateInitialAdmin(req.Email, hash)
 			if err != nil {
 				if errors.Is(err, ErrInitialAdminExists) {
-					loginLimiter.recordFailure(clientIP, req.Email, time.Now())
+					loginLimiter.RecordFailure(clientIP, req.Email, time.Now())
 					c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 				} else {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create initial admin user"})
@@ -186,16 +186,16 @@ func handleLogin(c *gin.Context) {
 			}
 		} else {
 			CheckPasswordHash(req.Password, dummyPasswordHash)
-			loginLimiter.recordFailure(clientIP, req.Email, time.Now())
+			loginLimiter.RecordFailure(clientIP, req.Email, time.Now())
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 			return
 		}
 	} else if !CheckPasswordHash(req.Password, user.PasswordHash) {
-		loginLimiter.recordFailure(clientIP, req.Email, time.Now())
+		loginLimiter.RecordFailure(clientIP, req.Email, time.Now())
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
-	loginLimiter.recordSuccess(clientIP, req.Email)
+	loginLimiter.RecordSuccess(clientIP, req.Email)
 
 	token, err := GenerateJWT(user)
 	if err != nil {
@@ -214,7 +214,7 @@ func handleLogin(c *gin.Context) {
 }
 
 func handleLoginMetrics(c *gin.Context) {
-	c.JSON(http.StatusOK, loginLimiter.metrics())
+	c.JSON(http.StatusOK, loginLimiter.Metrics())
 }
 
 func handleLogout(c *gin.Context) {
