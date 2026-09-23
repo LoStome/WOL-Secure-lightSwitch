@@ -13,9 +13,11 @@ import (
 	"net/http"
 	"net/mail"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -183,46 +185,6 @@ func findHost(id string) (*Host, error) {
 		}
 	}
 	return nil, fmt.Errorf("host %s not found", id)
-}
-
-func StartPingManager() {
-	fmt.Println("Ping Manager Started...")
-	lastPingTimes := make(map[string]time.Time)
-
-	for {
-		hosts, err := LoadHosts()
-		if err != nil {
-			log.Print("PingManager: error loading hosts")
-			time.Sleep(10 * time.Second) // retry later
-			continue
-		}
-
-		now := time.Now()
-		for _, h := range hosts {
-			interval := h.PingInterval
-			if interval <= 0 {
-				interval = 60 // Default to 60 seconds
-			}
-
-			lastPing, exists := lastPingTimes[h.ID]
-			if !exists || now.Sub(lastPing).Seconds() >= float64(interval) {
-				lastPingTimes[h.ID] = now
-				go func(host Host) {
-					online := IsOnline(host.IP)
-					hostStates.Lock()
-					state := hostStates.Status[host.ID]
-					state.Online = online
-					if online {
-						state.LastPinged = time.Now().Format("15:04:05")
-					}
-					hostStates.Status[host.ID] = state
-					hostStates.Unlock()
-				}(h)
-			}
-		}
-
-		time.Sleep(5 * time.Second) // check every 5 seconds if a ping should be triggered
-	}
 }
 
 // ----------------- API Handlers -----------------
@@ -792,8 +754,13 @@ func main() {
 		log.Fatalf("Failed to configure HTTP router: %v", err)
 	}
 
-	// Start the ping manager in the background
-	go StartPingManager()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	pingDone := make(chan struct{})
+	go func() {
+		defer close(pingDone)
+		StartPingManager(ctx)
+	}()
 
 	// Get port from environment variable, default to 8080 if not set
 	port := os.Getenv("PORT")
@@ -807,7 +774,27 @@ func main() {
 	}
 
 	server := newHTTPServer(r, net.JoinHostPort(bindAddress, port))
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	serveErrors := make(chan error, 1)
+	go func() { serveErrors <- server.ListenAndServe() }()
+	select {
+	case err := <-serveErrors:
+		stop()
+		<-pingDone
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	case <-ctx.Done():
+		stop()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := server.Shutdown(shutdownCtx)
+		cancel()
+		if err != nil {
+			server.Close()
+		}
+		<-serveErrors
+		<-pingDone
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 }
