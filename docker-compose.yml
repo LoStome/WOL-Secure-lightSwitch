@@ -4,6 +4,12 @@ services:
     container_name: wol_secure_lightswitch
     restart: unless-stopped
     network_mode: host # fundamental for wake on lan
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$${PORT:-7500}/healthz"]
+      interval: 5m
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     environment:
       - PORT=7500 # change this port to your own liking
       - BIND_ADDRESS=127.0.0.1 # default: HTTPS reverse proxy on this host

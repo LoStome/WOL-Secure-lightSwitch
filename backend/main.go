@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	cryptoRand "crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -618,6 +619,27 @@ func newRequestID() string {
 	return strconv.FormatInt(time.Now().UnixNano(), 16)
 }
 
+func handleHealthz(c *gin.Context) {
+	if _, err := LoadHosts(); err != nil || DB == nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+
+	sqlDB, err := DB.DB()
+	if err != nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(ctx); err != nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 func requestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := newRequestID()
@@ -660,6 +682,7 @@ func newRouter(trustedProxies []string) (*gin.Engine, error) {
 	r.Use(gin.Recovery())
 
 	// Public Routes
+	r.GET("/healthz", handleHealthz)
 	r.POST("/api/login", handleLogin)
 	r.GET("/api/setup", handleCheckSetup)
 
