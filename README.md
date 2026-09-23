@@ -88,9 +88,76 @@ secrets:
 ```
 For local runs outside Docker, you can set `JWT_SECRET` directly to a randomly generated value of at least 32 characters. `JWT_SECRET_FILE` takes precedence when both variables are set.
 
-The application serves plain HTTP and binds to `127.0.0.1` by default. Put it behind a reverse proxy that terminates TLS, expose only the proxy's HTTPS port, and block direct access to the application port with the host firewall. Set `BIND_ADDRESS` only when the proxy cannot reach loopback; do not expose the application directly to an untrusted network.
+### 2.1 Required HTTPS reverse proxy
 
-By default the application ignores forwarded client-IP headers. If a reverse proxy is used, set `TRUSTED_PROXIES` to a comma-separated list containing only that proxy's IP addresses or CIDR ranges (for example `127.0.0.1,::1`). Invalid entries and global ranges such as `0.0.0.0/0` or `::/0` are rejected at startup. Do not trust a range that can contain untrusted clients.
+SecureSwitch is designed to run behind an HTTPS reverse proxy. Direct use through `http://SERVER_IP:7500` is not supported: the backend serves plain HTTP and its authentication cookie is always marked `Secure`, so browsers only send it over HTTPS. Users must open the HTTPS URL of the reverse proxy, never the backend URL.
+
+`network_mode: host` is retained so the application can send Wake-on-LAN broadcasts through the host interfaces. `BIND_ADDRESS` controls only the HTTP listener and does not restrict outgoing WOL packets.
+
+Choose one of the following reverse-proxy layouts.
+
+#### Reverse proxy on the same host (recommended)
+
+Keep the default Compose setting:
+
+```yaml
+environment:
+  - PORT=7500
+  - BIND_ADDRESS=127.0.0.1
+  - TRUSTED_PROXIES=127.0.0.1,::1
+```
+
+Configure the reverse proxy upstream as `http://127.0.0.1:7500`. The backend then accepts connections only from the local host and is not reachable directly from the LAN. As optional defense in depth, an active UFW installation can explicitly reject external traffic to the backend port:
+
+```bash
+sudo ufw deny in to any port 7500 proto tcp
+sudo ufw status numbered
+```
+
+#### Reverse proxy on another host
+
+Assume this example network:
+
+- SecureSwitch host: `192.168.1.20`
+- Reverse proxy host: `192.168.1.10`
+
+First, allow only the reverse proxy through the firewall. Add the specific allow rule before the general deny rule so the proxy is not blocked:
+
+```bash
+sudo ufw allow in proto tcp from 192.168.1.10 to any port 7500
+sudo ufw deny in proto tcp to any port 7500
+sudo ufw status numbered
+```
+
+Check that the allow rule for `192.168.1.10` appears before the general deny rule for port `7500`. These commands assume UFW is already enabled; before enabling a new firewall remotely, preserve the machine's SSH or other administration access according to the operating system documentation.
+
+Then allow the backend to receive the proxy connection and trust forwarded client addresses only from that proxy:
+
+```yaml
+environment:
+  - PORT=7500
+  - BIND_ADDRESS=0.0.0.0
+  - TRUSTED_PROXIES=192.168.1.10
+```
+
+Validate and apply the Compose configuration only after the firewall rules are in place:
+
+```bash
+docker compose config --quiet
+docker compose up -d
+```
+
+Configure the remote reverse proxy upstream as `http://192.168.1.20:7500`. The connection between the proxy and SecureSwitch is still plain HTTP: use this layout only on a trusted private network or through an encrypted tunnel/VPN. All user-facing traffic must enter through the proxy's HTTPS URL.
+
+Verify from the reverse proxy host that the backend responds:
+
+```bash
+curl --connect-timeout 5 http://192.168.1.20:7500/
+```
+
+Run the same command from another LAN host and confirm that it is blocked. If a rollback is needed, restore `BIND_ADDRESS=127.0.0.1`, run `docker compose up -d`, inspect the numbered rules with `sudo ufw status numbered`, and remove only the rules added for port `7500` with `sudo ufw delete RULE_NUMBER`.
+
+Global trusted-proxy ranges such as `0.0.0.0/0` or `::/0` are rejected. Never trust a subnet containing untrusted clients.
 
 *Note for SSH Keys: you could also just copy the keys into a data/ssh folder and not reference them in the hosts.yaml file. This is not recommended for security reasons.*
 

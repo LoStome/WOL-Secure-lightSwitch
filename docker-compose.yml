@@ -9,6 +9,10 @@ services:
     network_mode: host # fundamental for wake on lan
     environment:
       - PORT=7500 # change this port to your own liking
+      - BIND_ADDRESS=127.0.0.1 # default: HTTPS reverse proxy on this host
+      # For a reverse proxy on another host, replace the line above with:
+      # - BIND_ADDRESS=0.0.0.0
+      # - TRUSTED_PROXIES=192.168.1.10 # replace with the proxy IP and configure the firewall first
       - TZ=Europe/Rome # change this to your desired timezone
       - JWT_SECRET_FILE=/run/secrets/jwt_secret
       - SSH_KNOWN_HOSTS_FILE=/run/secrets/ssh_known_hosts
