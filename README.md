@@ -206,27 +206,28 @@ For better security, it is best to use a dedicated user (e.g., `switchbot`) inst
 ```bash
 # Create the user
 sudo adduser switchbot
-
-# Add the user to the sudo group
-sudo usermod -aG sudo switchbot
 ```
 
 ### 2. Enable Passwordless Shutdown
-By default, sudo asks for a password. Since SecureSwitch runs automatically, you must create an exception for the shutdown command.
+The SSH account does not need membership in the `sudo` group. Grant it passwordless permission for only the command used by the example configuration, `/usr/sbin/poweroff`.
 
-Create a specific sudoers file:
+Edit a dedicated sudoers file with `visudo`:
 
 ```bash
-sudo nano /etc/sudoers.d/switchbot
+sudo visudo -f /etc/sudoers.d/switchbot
 ```
 
-Paste the following line (replace switchbot with your chosen username):
+Add the following line (replace `switchbot` if you chose a different SSH username):
 
 ```plaintext
-switchbot ALL=(ALL) NOPASSWD: /usr/sbin/poweroff, /usr/sbin/shutdown
+switchbot ALL=(root) NOPASSWD: /usr/sbin/poweroff
 ```
 
-Save and exit (Ctrl+O, Enter, Ctrl+X).
+`visudo` checks the file when saving. You can also validate it explicitly:
+
+```bash
+sudo visudo -cf /etc/sudoers.d/switchbot
+```
 
 ### 3. Verify Your hosts.yaml Configuration
 Ensure your hosts.yaml matches the setup. Use the `-n` (non-interactive) flag in the command to prevent the application from hanging if permissions are misconfigured:
@@ -236,9 +237,11 @@ Ensure your hosts.yaml matches the setup. Use the `-n` (non-interactive) flag in
   name: "Proxmox Node"
   ip: "192.168.1.101"
   user: "switchbot"
-  password: "your_password" # or use key_path (password and key are used only for logging in, not for the shutdown command)
+  key_path: "/run/secrets/ssh_private_key" # SSH login key mounted by Docker Compose
   cmd: "sudo -n /usr/sbin/poweroff"
 ```
+
+Provision the matching public key for `switchbot` on the target and the target host key in the configured SSH `known_hosts` file. For local runs outside Docker, configure `key_path` and `SSH_KNOWN_HOSTS_FILE` to point to readable files.
 
 
 ### 4. Run the Service
