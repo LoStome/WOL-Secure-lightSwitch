@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadHostsKeepsLastValidSnapshotDuringPartialSave(t *testing.T) {
+	loader := &Loader{}
 	workDir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workDir, "data"), 0o755); err != nil {
 		t.Fatal(err)
@@ -16,27 +17,28 @@ func TestLoadHostsKeepsLastValidSnapshotDuringPartialSave(t *testing.T) {
 	if err := os.WriteFile(path, []byte("- id: host-one\n  name: Host One\n  mac: AA:BB:CC:DD:EE:FF\n  ip: 192.0.2.1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	initial, err := LoadHosts()
+	initial, err := loader.LoadHosts()
 	if err != nil || len(initial) != 1 || initial[0].ID != "host-one" {
 		t.Fatalf("initial hosts = %+v, err = %v", initial, err)
 	}
 	if err := os.WriteFile(path, []byte("- id: [partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	hosts, err := LoadHosts()
+	hosts, err := loader.LoadHosts()
 	if err != nil || len(hosts) != 1 || hosts[0].ID != "host-one" {
 		t.Fatalf("hosts after partial save = %+v, err = %v; want last valid host", hosts, err)
 	}
 	if err := os.WriteFile(path, []byte("- id: host-two\n  name: Host Two\n  mac: 00:11:22:33:44:55\n  ip: 192.0.2.22\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	hosts, err = LoadHosts()
+	hosts, err = loader.LoadHosts()
 	if err != nil || len(hosts) != 1 || hosts[0].ID != "host-two" {
 		t.Fatalf("hosts after completed save = %+v, err = %v; want new host", hosts, err)
 	}
 }
 
 func TestLoadHostsRejectsInvalidInitialConfiguration(t *testing.T) {
+	loader := &Loader{}
 	workDir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workDir, "data"), 0o755); err != nil {
 		t.Fatal(err)
@@ -45,12 +47,13 @@ func TestLoadHostsRejectsInvalidInitialConfiguration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join("data", "hosts.yaml"), []byte("- id: [partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if hosts, err := LoadHosts(); err == nil || hosts != nil {
+	if hosts, err := loader.LoadHosts(); err == nil || hosts != nil {
 		t.Fatalf("invalid initial config = %+v, err = %v; want error and no hosts", hosts, err)
 	}
 }
 
 func TestLoadHostsReturnsIndependentCopies(t *testing.T) {
+	loader := &Loader{}
 	workDir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workDir, "data"), 0o755); err != nil {
 		t.Fatal(err)
@@ -60,15 +63,41 @@ func TestLoadHostsReturnsIndependentCopies(t *testing.T) {
 	if err := os.WriteFile(filepath.Join("data", "hosts.yaml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	hosts, err := LoadHosts()
+	hosts, err := loader.LoadHosts()
 	if err != nil {
 		t.Fatal(err)
 	}
 	hosts[0].Name = "changed"
 	hosts[0].SkipInterfaces[0] = "changed"
-	hosts, err = LoadHosts()
+	hosts, err = loader.LoadHosts()
 	if err != nil || hosts[0].Name != "Host One" || hosts[0].SkipInterfaces[0] != "Loopback" {
 		t.Fatalf("snapshot changed through caller: %+v, err = %v", hosts, err)
+	}
+}
+
+func TestLoadersKeepIndependentSnapshots(t *testing.T) {
+	workDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workDir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workDir)
+	path := filepath.Join("data", "hosts.yaml")
+	if err := os.WriteFile(path, []byte("- id: host-one\n  name: Host One\n  mac: AA:BB:CC:DD:EE:FF\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := &Loader{}
+	if _, err := first.LoadHosts(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("- id: [partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := &Loader{}
+	if hosts, err := second.LoadHosts(); err == nil || hosts != nil {
+		t.Fatalf("fresh loader = %+v, err = %v; want invalid initial config", hosts, err)
+	}
+	if hosts, err := first.LoadHosts(); err != nil || len(hosts) != 1 || hosts[0].ID != "host-one" {
+		t.Fatalf("existing loader = %+v, err = %v; want last valid host", hosts, err)
 	}
 }
 
@@ -88,12 +117,12 @@ func TestParseHostsRejectsInvalidFields(t *testing.T) {
 	}
 	for name, config := range tests {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseHosts([]byte(config)); err == nil {
+			if _, err := ParseHosts([]byte(config)); err == nil {
 				t.Fatal("invalid configuration accepted")
 			}
 		})
 	}
-	if hosts, err := parseHosts([]byte(valid)); err != nil || len(hosts) != 1 {
+	if hosts, err := ParseHosts([]byte(valid)); err != nil || len(hosts) != 1 {
 		t.Fatalf("valid configuration = %+v, err = %v", hosts, err)
 	}
 }
