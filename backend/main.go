@@ -22,7 +22,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
-	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
 
@@ -108,41 +107,6 @@ func validateDeviceID(id string) error {
 		}
 	}
 	return nil
-}
-
-// load hosts from yaml file, this is where you add new hosts to manage, along with their credentials and shutdown commands
-func LoadHosts() ([]Host, error) {
-	path := "data/hosts.yaml"
-	data, err := os.ReadFile(path)
-	if err != nil {
-		path = "../data/hosts.yaml"
-		data, err = os.ReadFile(path)
-		if err != nil {
-			log.Print("Error reading hosts.yaml")
-			return nil, err
-		}
-	}
-	// Uncomment for debug
-	// fmt.Printf("Successfully read %s file.\n", path)
-
-	var hosts []Host
-	err = yaml.Unmarshal(data, &hosts)
-	if err != nil {
-		return nil, err
-	}
-
-	seenIDs := make(map[string]bool)
-	for _, h := range hosts {
-		if err := validateDeviceID(h.ID); err != nil {
-			return nil, fmt.Errorf("invalid host ID %q: %w", h.ID, err)
-		}
-		if seenIDs[h.ID] {
-			return nil, fmt.Errorf("duplicate host ID %q", h.ID)
-		}
-		seenIDs[h.ID] = true
-	}
-
-	return hosts, nil
 }
 
 func configuredDeviceIDs() (map[string]struct{}, error) {
@@ -582,7 +546,7 @@ func newRequestID() string {
 }
 
 func handleHealthz(c *gin.Context) {
-	if _, err := LoadHosts(); err != nil || DB == nil {
+	if _, err := loadHostsWithStatus(); err != nil || DB == nil {
 		c.Status(http.StatusServiceUnavailable)
 		return
 	}

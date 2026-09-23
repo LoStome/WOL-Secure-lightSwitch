@@ -20,7 +20,7 @@ func TestHealthzChecksConfigurationAndDatabase(t *testing.T) {
 	t.Chdir(workDir)
 
 	configPath := filepath.Join(configDir, "hosts.yaml")
-	validConfig := "- id: test-host\n  name: Test host\n"
+	validConfig := "- id: test-host\n  name: Test host\n  mac: AA:BB:CC:DD:EE:FF\n"
 	if err := os.WriteFile(configPath, []byte(validConfig), 0o600); err != nil {
 		t.Fatalf("write test config: %v", err)
 	}
@@ -63,6 +63,9 @@ func TestHealthzChecksConfigurationAndDatabase(t *testing.T) {
 	response = requestHealth()
 	if response.Code != http.StatusServiceUnavailable || response.Body.Len() != 0 {
 		t.Fatalf("invalid config response = %d %q, want 503 with no body", response.Code, response.Body.String())
+	}
+	if hosts, err := LoadHosts(); err != nil || len(hosts) != 1 || hosts[0].ID != "test-host" {
+		t.Fatalf("hosts during invalid config = %+v, err = %v; want last valid host", hosts, err)
 	}
 
 	if err := os.WriteFile(configPath, []byte(validConfig), 0o600); err != nil {
