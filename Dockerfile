@@ -52,7 +52,7 @@ COPY --chown=wol:wol --from=backend-builder /app/backend/wol-server /app/wol-ser
 COPY --chown=wol:wol --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Espone la porta che userà il nostro programma
-EXPOSE 8080
+EXPOSE 7500
 
 # Il processo applicativo non deve avere privilegi root.
 USER wol

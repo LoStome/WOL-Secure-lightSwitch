@@ -62,12 +62,9 @@ chmod 600 data/jwt_secret
 ```
 
 ```yaml
-version: '3.8'
-
 services:
   wol-switch:
     image: lostome/wol_secure_lightswitch:latest
-    platform: linux/arm64 # Change to linux/amd64 if not using an ARM device like Raspberry Pi
     container_name: wol_secure_lightswitch
     restart: unless-stopped
     network_mode: host # Fundamental for Wake-on-LAN to broadcast correctly

@@ -1,9 +1,6 @@
-version: '3.8'
-
 services:
   wol-switch:
     image: docker.io/lostome/wol_secure_lightswitch@sha256:ceafb2762ffb45b889089b65df241cddae2a4951aa55f3ed60527a500db616dd
-    platform: linux/arm64 # or linux/amd64
     container_name: wol_secure_lightswitch
     restart: unless-stopped
     network_mode: host # fundamental for wake on lan
