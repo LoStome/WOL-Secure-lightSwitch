@@ -5,6 +5,9 @@ import { login, checkSetup, type User } from '../services/api';
 const minimumPasswordLength = 12;
 const maximumPasswordLength = 72;
 
+const getErrorMessage = (error: unknown): string | undefined =>
+  error instanceof Error ? error.message : undefined;
+
 interface LoginProps {
   onLoginSuccess: (user: User) => void;
 }
@@ -36,8 +39,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     try {
       const data = await login(email, password);
       onLoginSuccess(data.user);
-    } catch (err: any) {
-      setError(err.message || 'Login failed. Please check your credentials.');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err) || 'Login failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }

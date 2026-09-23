@@ -3,6 +3,9 @@ import { fetchUsers, createUser, updateUser, deleteUser, fetchHosts } from '../s
 import type { User, Host } from '../services/api';
 import { Shield, Trash2, Edit2, Plus, Loader2, User as UserIcon, X } from 'lucide-react';
 
+const getErrorMessage = (error: unknown): string | undefined =>
+  error instanceof Error ? error.message : undefined;
+
 const AdminPanel = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
@@ -30,8 +33,8 @@ const AdminPanel = () => {
       ]);
       setUsers(usersData);
       setHosts(hostsData);
-    } catch (err: any) {
-      setError('Failed to load admin data: ' + err.message);
+    } catch (err: unknown) {
+      setError('Failed to load admin data: ' + getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -72,7 +75,10 @@ const AdminPanel = () => {
     try {
       if (editingUserId) {
         // Edit mode
-        const updateData: any = { is_admin: isAdmin, devices: selectedDevices };
+        const updateData: { is_admin: boolean; devices: string[]; password?: string } = {
+          is_admin: isAdmin,
+          devices: selectedDevices
+        };
         if (password) {
           updateData.password = password;
         }
@@ -83,8 +89,8 @@ const AdminPanel = () => {
       }
       resetForm();
       await loadData();
-    } catch (err: any) {
-      setError(`Failed to ${editingUserId ? 'update' : 'create'} user: ` + err.message);
+    } catch (err: unknown) {
+      setError(`Failed to ${editingUserId ? 'update' : 'create'} user: ` + getErrorMessage(err));
     } finally {
       setSubmitLoading(false);
     }
@@ -95,8 +101,8 @@ const AdminPanel = () => {
     try {
       await deleteUser(id);
       await loadData();
-    } catch (err: any) {
-      setError('Failed to delete user: ' + err.message);
+    } catch (err: unknown) {
+      setError('Failed to delete user: ' + getErrorMessage(err));
     }
   };
 
