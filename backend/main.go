@@ -30,6 +30,7 @@ type Host struct {
 	Name           string   `yaml:"name"`
 	MAC            string   `yaml:"mac"`
 	IP             string   `yaml:"ip"`
+	WolInterface   string   `yaml:"wol_interface" json:"-"`
 	User           string   `yaml:"user" json:"-"`
 	PasswordFile   string   `yaml:"password_file" json:"-"`
 	KeyPath        string   `yaml:"key_path" json:"-"`

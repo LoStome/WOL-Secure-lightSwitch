@@ -1,5 +1,9 @@
 # list of hosts to send WoL packets to, along with their shutdown commands and credentials for SSH (if needed)
-# only id, name and mac are need for wol, the rest is for shutdown
+# WOL requires id, name and mac. Network selection: wol_interface (exact server
+# interface name) takes precedence, otherwise use the IP/hostname subnet.
+# Without either, exactly one eligible IPv4 network must remain after filtering.
+# skip_interfaces always applies (case-insensitive substring matching).
+# Multiple subnets on an interface require an IP to disambiguate.
 # device IDs must be unique, 1-64 ASCII characters, start with a letter or number,
 # and then contain only letters, numbers, '.', '_' or '-'. Assignments in the admin
 # panel must match an ID written here exactly.
@@ -7,12 +11,13 @@
   name: "Proxmox Node 1"
   mac: "AA:BB:CC:DD:EE:FF"
   ip: "192.168.1.101" #you can also use the hostname if it resolves correctly from the WOL app server
+  wol_interface: "" # optional, e.g. "eth0" or "Ethernet"; also works without ip
   user: "switchbot" # use a dedicated account with limited sudo rights
   password_file: "" # if key auth is unavailable, use only a separately mounted secret file
   key_path: "/run/secrets/ssh_private_key" # use the dedicated key mounted by Compose
   cmd: "sudo -n /usr/sbin/poweroff"
   ping_interval: 15
-  skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
+  skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] # interfaces of the WOL app server
 
 
 # example config for a windows host; its id must follow the same device ID rules above
@@ -25,6 +30,6 @@
   key_path: "/run/secrets/ssh_private_key" # use the dedicated key mounted by Compose
   cmd: "shutdown /s /t 0"
   ping_interval: 30
-  skip_interfaces: ["docker", "veth", "br-"] #case sensitive, relative to the interfaces of the WOL app server, not the receiver host
+  skip_interfaces: ["docker", "veth", "br-"] # interfaces of the WOL app server
 
 # you can continue to add devices indefinitely
