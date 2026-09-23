@@ -118,7 +118,7 @@ const AdminPanel = () => {
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-10">
       
       {error && (
-        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl">
+        <div role="alert" className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl">
           {error}
         </div>
       )}
@@ -146,8 +146,9 @@ const AdminPanel = () => {
         <form onSubmit={handleSubmitUser} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">Email</label>
+              <label htmlFor="admin-email" className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">Email</label>
               <input
+                id="admin-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -161,10 +162,11 @@ const AdminPanel = () => {
             </div>
             
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">
+              <label htmlFor="admin-password" className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">
                 Password {editingUserId && <span className="normal-case text-amber-500/70 ml-1">(Leave blank to keep current)</span>}
               </label>
               <input
+                id="admin-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -196,11 +198,11 @@ const AdminPanel = () => {
           </div>
 
           {!isAdmin && hosts.length > 0 && (
-            <div className="space-y-3 pt-2">
-              <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1 flex items-center justify-between">
+            <fieldset className="space-y-3 pt-2">
+              <legend className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1 flex items-center justify-between">
                 <span>Allowed Devices</span>
                 <span className="text-zinc-500 font-normal normal-case">Select which hosts this user can see and control</span>
-              </label>
+              </legend>
               <p className="text-xs text-zinc-500 ml-1">Device IDs come from hosts.yaml and use 1-64 ASCII characters: letters, numbers, '.', '_' or '-'; the first character must be a letter or number.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {hosts.map(host => (
@@ -225,7 +227,7 @@ const AdminPanel = () => {
                   </label>
                 ))}
               </div>
-            </div>
+            </fieldset>
           )}
 
           <div className="pt-4 flex justify-end">
@@ -290,6 +292,7 @@ const AdminPanel = () => {
                       <button
                         onClick={() => handleEditClick(user)}
                         className="p-2 text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors inline-flex"
+                        aria-label={`Edit user ${user.email}`}
                         title="Edit User"
                       >
                         <Edit2 className="w-4 h-4" />
@@ -297,6 +300,7 @@ const AdminPanel = () => {
                       <button
                         onClick={() => handleDeleteUser(user.id)}
                         className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors inline-flex"
+                        aria-label={`Delete user ${user.email}`}
                         title="Delete User"
                       >
                         <Trash2 className="w-4 h-4" />

@@ -79,12 +79,13 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ host }) => {
           onClick={handlePowerToggle}
           disabled={isLoading}
           aria-busy={isLoading}
+          aria-label={`${isOn ? 'Turn off' : 'Turn on'} ${host.Name}`}
           className={`relative flex items-center justify-center w-16 h-16 rounded-full transition-all duration-300 shadow-inner overflow-hidden ${buttonStyle}`}
         >
           {/* Glow effect */}
           <div className={`absolute inset-0 rounded-full blur-md opacity-50 ${glowStyle}`}></div>
 
-          <Power className={`w-8 h-8 z-10 ${isLoading ? 'animate-pulse' : ''}`} />
+          <Power aria-hidden="true" className={`w-8 h-8 z-10 ${isLoading ? 'animate-pulse' : ''}`} />
         </button>
 
         {actionState.status !== 'idle' && (
