@@ -44,12 +44,3 @@ Pull requests should explain the behavior change, security impact, and validatio
 ## Security & Configuration Tips
 
 Set a long random `JWT_SECRET`; never rely on the development fallback. Prefer dedicated SSH keys and narrowly scoped sudoers rules. Preserve server-side role and device-assignment checks for every device action.
-
-## Improvement Plan
-
-- Before starting work, read `docs/ANALISI.md`.
-- Work on one issue at a time, identified by its stable ID.
-- After each fix, run the relevant tests, update the issue status in `docs/ANALISI.md`, and create a separate commit containing the issue ID in its message.
-- Do not modify anything outside the requested issue's scope.
-
-The report lists unresolved vulnerabilities. Committing and pushing it would disclose them before they are fixed. Use one of these approaches:
