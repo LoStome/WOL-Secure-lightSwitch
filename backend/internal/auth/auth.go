@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -44,8 +46,14 @@ func LoadJWTSecret() ([]byte, error) {
 			return nil, fmt.Errorf("read JWT_SECRET_FILE: %w", err)
 		}
 		secret = strings.TrimSpace(string(contents))
-	} else {
-		secret = strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	} else if configured := strings.TrimSpace(os.Getenv("JWT_SECRET")); configured != "" {
+		secret = configured
+	} else if os.Getenv("INITIALIZE_DATA") == "true" {
+		contents, err := loadOrCreateJWTSecret("data/jwt_secret")
+		if err != nil {
+			return nil, fmt.Errorf("load generated JWT secret: %w", err)
+		}
+		secret = strings.TrimSpace(string(contents))
 	}
 
 	if secret == "" {
@@ -61,6 +69,38 @@ func LoadJWTSecret() ([]byte, error) {
 	}
 
 	return []byte(secret), nil
+}
+
+func loadOrCreateJWTSecret(path string) ([]byte, error) {
+	contents, err := os.ReadFile(path)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		return contents, err
+	}
+
+	generated := make([]byte, 32)
+	if _, err := rand.Read(generated); err != nil {
+		return nil, err
+	}
+	secret := make([]byte, hex.EncodedLen(len(generated)))
+	hex.Encode(secret, generated)
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return os.ReadFile(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := file.Write(secret); err != nil {
+		file.Close()
+		os.Remove(path)
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		os.Remove(path)
+		return nil, err
+	}
+	return secret, nil
 }
 
 // HashPassword generates a bcrypt hash of the password

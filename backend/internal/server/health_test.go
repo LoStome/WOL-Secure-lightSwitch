@@ -1,12 +1,58 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"secure-switch-backend/internal/auth"
+	"secure-switch-backend/internal/config"
 )
+
+func TestFirstStartWithNoDevicesIsHealthy(t *testing.T) {
+	workDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workDir, "data"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workDir)
+	if err := config.EnsureInitialHosts(filepath.Join("data", "hosts.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	h := newTestHarness(t)
+	h.secret = []byte(strings.Repeat("s", auth.MinimumJWTSecretLength))
+	router, err := h.router(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	health := httptest.NewRecorder()
+	router.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if health.Code != http.StatusNoContent {
+		t.Fatalf("health = %d, want 204", health.Code)
+	}
+
+	login := httptest.NewRecorder()
+	router.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"email":"admin@example.com","password":"Strong-Admin-Password-42!"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatalf("initial admin login = %d: %s", login.Code, login.Body.String())
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/hosts", nil)
+	for _, cookie := range login.Result().Cookies() {
+		request.AddCookie(cookie)
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("hosts status = %d: %s", response.Code, response.Body.String())
+	}
+	var hosts []Host
+	if err := json.Unmarshal(response.Body.Bytes(), &hosts); err != nil || hosts == nil || len(hosts) != 0 {
+		t.Fatalf("hosts response = %q, decoded = %+v, err = %v", response.Body.String(), hosts, err)
+	}
+}
 
 func TestHealthzChecksConfigurationAndDatabase(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "app")

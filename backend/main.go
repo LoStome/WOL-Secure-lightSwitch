@@ -24,6 +24,15 @@ import (
 )
 
 func main() {
+	if os.Getenv("INITIALIZE_DATA") == "true" {
+		if err := os.MkdirAll("data", 0o700); err != nil {
+			log.Fatalf("Cannot create application data directory: %v", err)
+		}
+		if err := config.EnsureInitialHosts("data/hosts.yaml"); err != nil {
+			log.Fatalf("Cannot initialize hosts configuration: %v", err)
+		}
+	}
+
 	secret, err := auth.LoadJWTSecret()
 	if err != nil {
 		log.Fatalf("Invalid JWT configuration: %v", err)

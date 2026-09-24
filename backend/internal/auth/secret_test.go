@@ -3,11 +3,13 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestLoadJWTSecretRejectsInvalidConfiguration(t *testing.T) {
+	t.Setenv("INITIALIZE_DATA", "")
 	tests := []struct {
 		name   string
 		secret string
@@ -31,6 +33,7 @@ func TestLoadJWTSecretRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestLoadJWTSecretFromEnvironment(t *testing.T) {
+	t.Setenv("INITIALIZE_DATA", "true")
 	want := strings.Repeat("a", MinimumJWTSecretLength)
 	t.Setenv("JWT_SECRET_FILE", "")
 	t.Setenv("JWT_SECRET", "  "+want+"  ")
@@ -81,10 +84,52 @@ func TestLoadJWTSecretFileTakesPrecedence(t *testing.T) {
 }
 
 func TestLoadJWTSecretDoesNotFallBackWhenFileIsMissing(t *testing.T) {
+	t.Setenv("INITIALIZE_DATA", "true")
 	t.Setenv("JWT_SECRET_FILE", filepath.Join(t.TempDir(), "missing"))
 	t.Setenv("JWT_SECRET", strings.Repeat("d", MinimumJWTSecretLength))
 
 	if _, err := LoadJWTSecret(); err == nil {
 		t.Fatal("LoadJWTSecret() succeeded with a missing configured secret file")
+	}
+}
+
+func TestGeneratedJWTSecretPersistsAndInvalidFileIsNotReplaced(t *testing.T) {
+	workDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workDir, "data"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workDir)
+	t.Setenv("INITIALIZE_DATA", "true")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("JWT_SECRET_FILE", "")
+
+	first, err := LoadJWTSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 64 {
+		t.Fatalf("generated secret length = %d, want 64", len(first))
+	}
+	path := filepath.Join("data", "jwt_secret")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("secret permissions = %04o, want 0600", info.Mode().Perm())
+	}
+	second, err := LoadJWTSecret()
+	if err != nil || string(second) != string(first) {
+		t.Fatalf("second load changed secret: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("short-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadJWTSecret(); err == nil {
+		t.Fatal("accepted invalid existing secret")
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil || string(contents) != "short-secret" {
+		t.Fatalf("invalid existing secret was changed: %q, %v", contents, err)
 	}
 }

@@ -35,7 +35,7 @@ func (a *App) handleGetHosts(c *gin.Context) {
 	isAdmin := c.GetBool("isAdmin")
 
 	// Filter hosts based on authorization
-	var authorizedHosts []Host
+	authorizedHosts := make([]Host, 0, len(hosts))
 	for i := range hosts {
 		if a.isAuthorizedForDevice(userID, hosts[i].ID, isAdmin) {
 			// Attach online state to hosts from cache

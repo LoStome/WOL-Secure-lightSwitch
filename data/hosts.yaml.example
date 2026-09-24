@@ -14,7 +14,7 @@
   wol_interface: "" # optional, e.g. "eth0" or "Ethernet"; also works without ip
   user: "switchbot" # use a dedicated account with limited sudo rights
   password_file: "" # if key auth is unavailable, use only a separately mounted secret file
-  key_path: "/run/secrets/ssh_private_key" # use the dedicated key mounted by Compose
+  key_path: "/app/data/.ssh/wol_switch_ed25519" # optional dedicated key in the persistent volume
   cmd: "sudo -n /usr/sbin/poweroff"
   ping_interval: 15
   skip_interfaces: ["Tailscale", "vEthernet", "Loopback", "Bluetooth"] # interfaces of the WOL app server
@@ -27,7 +27,7 @@
   ip: "192.168.1.100" #you can also use the hostname if it resolves correctly from the WOL app server
   user: "your_user"
   password_file: "" # if key auth is unavailable, use only a separately mounted secret file
-  key_path: "/run/secrets/ssh_private_key" # use the dedicated key mounted by Compose
+  key_path: "/app/data/.ssh/wol_switch_ed25519" # optional dedicated key in the persistent volume
   cmd: "shutdown /s /t 0"
   ping_interval: 30
   skip_interfaces: ["docker", "veth", "br-"] # interfaces of the WOL app server
