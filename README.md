@@ -1,28 +1,158 @@
 # WOL-Secure-lightSwitch (SecureSwitch)
 
-SecureSwitch is a web app for Wake-on-LAN and optional SSH shutdown. It shows device availability, supports an initial administrator and lets that administrator assign devices to other users.
+SecureSwitch is a lightweight web application for managing devices on a local network. It combines Wake-on-LAN (WOL), availability monitoring and optional remote shutdown in one browser interface.
 
-## Install with Docker Compose
+The backend is written in Go and the frontend in React. The application is designed for a Docker deployment behind an HTTPS reverse proxy, with role-based access control so administrators can decide which devices each user may control.
 
-You need a Linux Docker host with Docker Compose and an HTTPS reverse proxy. SecureSwitch serves HTTP on `127.0.0.1:7500` by default; browsers must use the proxy's HTTPS address because authentication uses a Secure cookie. Host networking lets the app send WOL broadcasts.
+## Features
 
-1. Copy [docker-compose.yml](docker-compose.yml) to your server. Set its `image:` to the immutable digest of an image built from this version of the code. Older images do not create the initial configuration automatically; the `latest` tag may still refer to an older release.
-2. If another service uses port `7500`, stop it or choose another `PORT` and update the proxy upstream. Keep `BIND_ADDRESS=127.0.0.1` when the proxy runs on the same host.
-3. From the directory containing the Compose file, start the service:
+- **Wake-on-LAN:** wake configured devices by sending Magic Packets through the application host's network interfaces.
+- **Availability monitoring:** show whether a device responds to ping checks.
+- **Remote shutdown:** optionally execute a restricted shutdown command over SSH, using a private key or a protected password file.
+- **Role-based access control:** administrators manage users and devices; standard users can control only their assigned devices.
+- **First-run setup:** the first account created is granted administrator privileges.
+- **Docker deployment:** the application, database and configuration are kept in a persistent Docker volume.
 
-   ```bash
-   docker compose config --quiet
-   docker compose up -d
-   ```
+## Screenshots
 
-4. Compose creates the named volume `wol_secure_lightswitch_data`. On first start, the app creates a random JWT secret, an empty `hosts.yaml` and its SQLite database there. No host directory or SSH files are needed. An empty device list is healthy.
-5. Point the local HTTPS proxy upstream to `http://127.0.0.1:7500`. Open the HTTPS URL and create the first administrator account. The dashboard initially says “No devices configured.” Add devices using the example below; configure SSH only if you need remote shutdown.
+### Administrator dashboard
 
-Docker selects the appropriate CPU architecture from a multi-platform image; no `platform:` setting is needed. A container marked `unhealthy` is not restarted solely because of its health status.
+The administrator dashboard shows the configured devices and their current availability.
 
-### Add devices
+![Administrator dashboard](assets/readMe/mainPanelAdmin.png)
 
-Create a local `hosts.yaml` containing a YAML list. For WOL, a device needs `id`, `name` and `mac`; set `ip` or `wol_interface` when needed to select the correct network. For example:
+### User dashboard
+
+Standard users see and control only the devices assigned to them.
+
+![User dashboard](assets/readMe/mainPanelUser.png)
+
+### Administration panel
+
+Administrators can create users and manage device assignments.
+
+![Administration panel](assets/readMe/adminPanel.png)
+
+---
+
+<div style="page-break-after: always;"></div>
+
+# Installation and configuration
+
+## Prerequisites
+
+The recommended deployment requires:
+
+- a Linux host with Docker and Docker Compose;
+- an HTTPS reverse proxy, such as Nginx, Caddy or Traefik;
+- network access from the Docker host to the devices that will receive WOL packets or SSH commands.
+
+The default Compose configuration uses host networking so WOL broadcasts can use the host's network interfaces. It listens on `127.0.0.1:7500`; users must access SecureSwitch through the HTTPS address of the reverse proxy.
+
+## 1. Start SecureSwitch
+
+Copy [docker-compose.yml](docker-compose.yml) to the server. Review the image reference and environment values before starting it. The repository Compose file currently uses the `latest` tag; for a production installation, prefer an immutable image digest corresponding to the version being deployed.
+
+Validate and start the service:
+
+```bash
+docker compose config --quiet
+docker compose up -d
+```
+
+The Compose file creates the named volume `wol_secure_lightswitch_data` and mounts it at `/app/data`. On the first start, `INITIALIZE_DATA=true` allows the application to create:
+
+- a random JWT signing secret;
+- an empty `hosts.yaml` configuration;
+- the SQLite database.
+
+No host `data/` directory or manually generated JWT secret is required for this Compose configuration. Do not remove the volume during normal updates: it contains the users, database, device configuration, signing secret and any optional SSH files.
+
+Check the service after it starts:
+
+```bash
+docker ps
+docker inspect --format '{{.State.Health.Status}}' wol_secure_lightswitch
+docker logs --tail 50 wol_secure_lightswitch
+```
+
+The healthcheck calls `/healthz` every five minutes. An `unhealthy` status is a diagnostic signal; Docker does not restart a container solely because its health status is unhealthy.
+
+## 2. Configure the HTTPS reverse proxy
+
+SecureSwitch serves plain HTTP internally, but its authentication cookie is marked `Secure`. Users must therefore open the HTTPS URL exposed by the reverse proxy. Direct browser access to `http://SERVER_IP:7500` is not supported for normal use.
+
+### Reverse proxy on the same host
+
+This is the recommended layout. Keep the default binding:
+
+```yaml
+environment:
+  - PORT=7500
+  - BIND_ADDRESS=127.0.0.1
+```
+
+Configure the proxy upstream as:
+
+```text
+http://127.0.0.1:7500
+```
+
+If the proxy forwards client information, configure `TRUSTED_PROXIES` with only the local proxy addresses, for example:
+
+```yaml
+environment:
+  - TRUSTED_PROXIES=127.0.0.1,::1
+```
+
+Do not add broad values such as `0.0.0.0/0` or `::/0`. The backend should not be directly reachable from the LAN.
+
+### Reverse proxy on another host
+
+If the proxy is on another server, bind the application to the network and restrict the port with a firewall. For example, if the SecureSwitch host is `192.168.1.20` and the proxy is `192.168.1.10`:
+
+```yaml
+environment:
+  - PORT=7500
+  - BIND_ADDRESS=0.0.0.0
+  - TRUSTED_PROXIES=192.168.1.10
+```
+
+Allow port `7500` only from the proxy host. With UFW, the rules must be ordered so the specific allow rule comes before the general deny rule:
+
+```bash
+sudo ufw allow in proto tcp from 192.168.1.10 to any port 7500
+sudo ufw deny in proto tcp to any port 7500
+sudo ufw status numbered
+```
+
+Configure the remote proxy upstream as `http://192.168.1.20:7500`. The proxy-to-application connection is still plain HTTP, so use a trusted private network, VPN or encrypted tunnel. Apply the Compose change only after the firewall is ready:
+
+```bash
+docker compose config --quiet
+docker compose up -d
+```
+
+Verify connectivity from the proxy host:
+
+```bash
+curl --connect-timeout 5 http://192.168.1.20:7500/healthz
+```
+
+## 3. Create the first administrator
+
+Open the HTTPS URL configured on the reverse proxy. On a new installation, SecureSwitch detects that no users exist and presents the initial account setup. The first account is automatically granted administrator privileges.
+
+After signing in, the administrator can:
+
+1. view all devices defined in `hosts.yaml`;
+2. create additional users;
+3. assign device IDs to each standard user;
+4. wake or shut down devices for which the account has permission.
+
+## 4. Configure devices
+
+Create a local file named `hosts.yaml` and use [data/hosts.yaml.example](data/hosts.yaml.example) as the complete reference. For a minimal WOL-only device, the required fields are `id`, `name` and `mac`:
 
 ```yaml
 - id: pc-gaming
@@ -33,9 +163,16 @@ Create a local `hosts.yaml` containing a YAML list. For WOL, a device needs `id`
   skip_interfaces: ["docker", "veth", "br-"]
 ```
 
-The full field example is in [data/hosts.yaml.example](data/hosts.yaml.example). Device IDs must be unique, 1–64 ASCII characters long, begin with a letter or digit, and otherwise contain only letters, digits, `.`, `_` or `-`. User assignments use these IDs.
+The device ID must be unique, 1–64 ASCII characters long, start with a letter or digit, and contain only letters, digits, `.`, `_` or `-`. User assignments refer to this ID exactly.
 
-From the directory containing your local `hosts.yaml`, copy it into the running container's persistent volume:
+For WOL network selection:
+
+- `wol_interface` selects an exact network interface name and has highest priority;
+- otherwise, `ip` or a resolvable hostname helps select the compatible subnet;
+- if neither is configured, exactly one eligible IPv4 network must remain;
+- `skip_interfaces` is always applied and uses case-insensitive substring matching.
+
+To upload the configuration into the persistent volume:
 
 ```bash
 docker cp ./hosts.yaml wol_secure_lightswitch:/app/data/hosts.yaml
@@ -43,18 +180,22 @@ docker exec -u 0 wol_secure_lightswitch chown wol:wol /app/data/hosts.yaml
 docker exec -u 0 wol_secure_lightswitch chmod 600 /app/data/hosts.yaml
 ```
 
-The app reloads `hosts.yaml` automatically. Check its health and logs after uploading:
+SecureSwitch reloads `hosts.yaml` automatically. Check the health status and logs after uploading:
 
 ```bash
 docker inspect --format '{{.State.Health.Status}}' wol_secure_lightswitch
 docker logs --tail 50 wol_secure_lightswitch
 ```
 
-If the YAML is invalid, the healthcheck reports `unhealthy`; the last valid device list remains available. Correct the file and check again.
+If the new YAML is invalid, the healthcheck reports a configuration failure while the last valid device list remains available. Correct the file and upload it again.
 
-### Optional SSH shutdown
+## 5. Optional SSH shutdown
 
-WOL needs no SSH setup. For shutdown, place a dedicated private key and a verified `known_hosts` file in `/app/data/.ssh/` in the named volume. Verify the target host key fingerprint independently before adding it; unknown or changed host keys are rejected. On the Docker host, with the two files in your current directory:
+Wake-on-LAN does not require SSH. Configure SSH only for devices that need remote shutdown.
+
+### SSH files in the persistent volume
+
+For key-based authentication, copy a dedicated private key and a verified `known_hosts` file into `/app/data/.ssh/`:
 
 ```bash
 docker exec -u 0 wol_secure_lightswitch mkdir -p /app/data/.ssh
@@ -66,58 +207,74 @@ docker exec -u 0 wol_secure_lightswitch chmod 600 /app/data/.ssh/wol_switch_ed25
 docker exec -u 0 wol_secure_lightswitch chmod 600 /app/data/.ssh/known_hosts
 ```
 
-Add the SSH settings to that device in `hosts.yaml`:
+Verify the target host fingerprint independently before adding it to `known_hosts`. Unknown or changed host keys are rejected. The default Docker path is `/app/data/.ssh/known_hosts`; `SSH_KNOWN_HOSTS_FILE` can override it.
+
+Add the SSH settings to the device:
 
 ```yaml
+- id: server-proxmox
+  name: Proxmox Node
+  mac: "AA:BB:CC:DD:EE:FF"
+  ip: "192.168.1.101"
   user: switchbot
   key_path: /app/data/.ssh/wol_switch_ed25519
   cmd: sudo -n /usr/sbin/poweroff
 ```
 
-The app uses `/app/data/.ssh/known_hosts` by default in Docker. You may instead set `SSH_KNOWN_HOSTS_FILE` to another readable file. Password authentication is supported with `password_file` pointing to a protected file in the volume; use either `password_file` or `key_path`, never both for one device. Do not put plaintext passwords or private keys in `hosts.yaml`.
+Use exactly one SSH credential source for each device: `key_path` or `password_file`. Never put a plaintext password or private key directly in `hosts.yaml`.
 
-For a Linux target, create a dedicated SSH account and allow only the required poweroff command:
+Password authentication is supported when `password_file` points to a protected file in the persistent volume. The file must contain only the target account's password and must be readable by the unprivileged `wol` user.
+
+### Restrict the shutdown command on a Linux target
+
+Create a dedicated account on the target host:
 
 ```bash
 sudo adduser switchbot
 sudo visudo -f /etc/sudoers.d/switchbot
 ```
 
-Add `switchbot ALL=(root) NOPASSWD: /usr/sbin/poweroff` to that sudoers file. Install the matching public key on the target and verify the rule with `sudo visudo -cf /etc/sudoers.d/switchbot`. The SSH account does not need membership in the `sudo` group.
+Add only the required command:
 
-### Other proxy layouts
-
-For a proxy on another host, change `BIND_ADDRESS` to `0.0.0.0`, set `TRUSTED_PROXIES` to that proxy's IP, and use a host firewall to permit port `7500` only from the proxy. The proxy-to-app connection is plain HTTP, so use a trusted private network or encrypted tunnel. Do this before opening access to the backend; direct browser access over HTTP does not support Secure authentication cookies.
-
-### Update, back up and restore
-
-To update, change only the image reference in the same Compose file and run `docker compose up -d`. Keep the `wol_secure_lightswitch_data` volume. It contains `secure-switch.db`, `hosts.yaml`, `jwt_secret` and any optional SSH files. Do not remove the volume during updates: removing it deletes the installation's users, configuration and signing secret.
-
-Back up the entire volume, including the JWT secret, to a protected location. Stop the service first so SQLite is closed. On the Docker host:
-
-```bash
-docker compose stop wol-switch
-umask 077
-docker run --rm -v wol_secure_lightswitch_data:/source:ro -v "$PWD":/backup alpine:3.24 tar -C /source -czf /backup/secure-switch-backup.tar.gz .
-docker compose start wol-switch
+```text
+switchbot ALL=(root) NOPASSWD: /usr/bin/poweroff
 ```
 
-Store this archive privately: it contains password hashes, the JWT secret and potentially SSH credentials. To restore, stop the service, preserve a backup of its current volume, then extract the archive into `wol_secure_lightswitch_data`:
+Use the actual path reported by the target system if it differs. Validate the rule:
 
 ```bash
-docker compose stop wol-switch
-docker run --rm -v wol_secure_lightswitch_data:/target -v "$PWD":/backup alpine:3.24 tar -C /target -xzf /backup/secure-switch-backup.tar.gz
-docker compose start wol-switch
+sudo visudo -cf /etc/sudoers.d/switchbot
 ```
 
-Restore into an empty volume when possible. If restoring into an existing volume, remove or archive its prior contents first so files absent from the backup do not remain. Verify `/healthz` and login after starting the service. A normal image update does not require backup restoration.
+Install the matching public key on the target. The SSH account does not need membership in the `sudo` group.
 
-### Local development
+## Account input rules
 
-Outside Docker, set `JWT_SECRET` to a random value of at least 32 characters, or provide `JWT_SECRET_FILE`. An explicitly configured secret file takes precedence; a missing or invalid one fails startup. `INITIALIZE_DATA=true` opts into first-run file creation. Run `go test ./...` from `backend/` and `npm run build` from `frontend/` before building an image.
+- Email addresses must be valid.
+- Passwords must contain at least 12 characters.
+- When editing an account, leave the password field empty to retain the current password.
+- An explicitly empty device list removes all assignments; an omitted list leaves existing assignments unchanged.
 
-## Screenshots
+## Local development
 
-![Admin dashboard](assets/readMe/mainPanelAdmin.png)
-![User dashboard](assets/readMe/mainPanelUser.png)
-![Admin panel](assets/readMe/adminPanel.png)
+Outside Docker, configure a JWT secret with at least 32 characters using `JWT_SECRET`, or provide `JWT_SECRET_FILE`. A configured secret file takes precedence. The application refuses to start when the required secret is missing or invalid. Set `INITIALIZE_DATA=true` only when first-run data creation is intended.
+
+Run backend checks from `backend/`:
+
+```bash
+go test ./...
+go vet ./...
+```
+
+Build and lint the frontend from `frontend/`:
+
+```bash
+npm run build
+npm run lint
+```
+
+For a complete deployment configuration check:
+
+```bash
+docker compose config --quiet
+```
