@@ -14,6 +14,7 @@ function App() {
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [showAdmin, setShowAdmin] = useState(() => isPreviewMode
     && new URLSearchParams(window.location.search).get('panel') === 'admin');
+  const hidePreviewNotice = isPreviewMode && new URLSearchParams(window.location.search).has('capture');
   const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
@@ -56,7 +57,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      {isPreviewMode && <div className="preview-banner" role="status">Local preview · Example data only · Device actions are simulated</div>}
+      {isPreviewMode && !hidePreviewNotice && <div className="preview-banner" role="status">Local preview · Example data only · Device actions are simulated</div>}
       <header className="site-header">
         <div className="header-inner">
           <div className="brand"><img className="brand-logo" src="/logo.svg" alt="" /><span>SecureSwitch</span></div>
@@ -67,7 +68,7 @@ function App() {
           <div className="header-actions"><button className="theme-toggle" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`} title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}>
             {theme === 'light' ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}
           </button>
-          {currentUser && <button className="header-logout" onClick={handleLogout}><LogOut size={17} aria-hidden="true" /><span>{isPreviewMode ? 'Exit preview' : 'Log out'}</span></button>}</div>
+          {currentUser && <button className="header-logout" onClick={handleLogout}><LogOut size={17} aria-hidden="true" /><span>Log out</span></button>}</div>
         </div>
       </header>
       <main className="page-content">{!currentUser ? <Login onLoginSuccess={setCurrentUser} /> : showAdmin && currentUser.is_admin ? <AdminPanel /> : <DeviceList />}</main>

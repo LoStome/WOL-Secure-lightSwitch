@@ -1,8 +1,7 @@
 import type { Host, SessionUser, AdminUser } from './types';
-import { currentPreviewUser, previewScenario, previewHosts, previewUsers, previewSetHostOnline, previewCreateUser, previewUpdateUser, previewDeleteUser } from './previewData.ts';
 export type { Host, SessionUser, AdminUser } from './types';
 
-export const isPreviewMode = import.meta.env?.DEV === true
+export const isPreviewMode = import.meta.env.DEV
   && typeof window !== 'undefined'
   && ['1', '2', '3', '4'].includes(new URLSearchParams(window.location.search).get('preview') ?? '');
 
@@ -148,7 +147,12 @@ const request = async <T>(
 };
 
 export const login = async (email: string, password: string): Promise<{ user: SessionUser }> => {
-  if (isPreviewMode) { void email; void password; return { user: currentPreviewUser }; }
+  if (isPreviewMode) {
+    void email;
+    void password;
+    const { currentPreviewUser } = await import('./previewData.ts');
+    return { user: currentPreviewUser };
+  }
   return request(`${API_BASE}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -157,7 +161,10 @@ export const login = async (email: string, password: string): Promise<{ user: Se
 };
 
 export const getCurrentUser = async (): Promise<SessionUser | null> => {
-  if (isPreviewMode) return previewScenario === '3' ? null : currentPreviewUser;
+  if (isPreviewMode) {
+    const { currentPreviewUser, previewScenario } = await import('./previewData.ts');
+    return previewScenario === '3' ? null : currentPreviewUser;
+  }
   return request(`${API_BASE}/session`);
 };
 
@@ -170,17 +177,26 @@ export const logout = async (): Promise<void> => {
 };
 
 export const checkSetup = async (): Promise<{ needs_setup: boolean }> => {
-  if (isPreviewMode) return { needs_setup: previewScenario === '3' };
+  if (isPreviewMode) {
+    const { previewScenario } = await import('./previewData.ts');
+    return { needs_setup: previewScenario === '3' };
+  }
   return request(`${API_BASE}/setup`);
 };
 
 export const fetchHosts = async (signal?: AbortSignal): Promise<Host[]> => {
-  if (isPreviewMode) { void signal; return previewHosts(); }
+  if (isPreviewMode) {
+    void signal;
+    return (await import('./previewData.ts')).previewHosts();
+  }
   return request(`${API_BASE}/hosts`, { headers: getHeaders(), signal }, { reloadOnUnauthorized: true });
 };
 
 export const wakeHost = async (id: string): Promise<void> => {
-  if (isPreviewMode) { previewSetHostOnline(id, true); return; }
+  if (isPreviewMode) {
+    (await import('./previewData.ts')).previewSetHostOnline(id, true);
+    return;
+  }
   return request(`${API_BASE}/wol/${id}`, {
     method: 'POST',
     headers: getHeaders(),
@@ -188,7 +204,10 @@ export const wakeHost = async (id: string): Promise<void> => {
 };
 
 export const shutdownHost = async (id: string): Promise<void> => {
-  if (isPreviewMode) { previewSetHostOnline(id, false); return; }
+  if (isPreviewMode) {
+    (await import('./previewData.ts')).previewSetHostOnline(id, false);
+    return;
+  }
   return request(`${API_BASE}/shutdown/${id}`, {
     method: 'POST',
     headers: getHeaders(),
@@ -196,7 +215,7 @@ export const shutdownHost = async (id: string): Promise<void> => {
 };
 
 export const fetchUsers = async (): Promise<AdminUser[]> => {
-  if (isPreviewMode) return previewUsers();
+  if (isPreviewMode) return (await import('./previewData.ts')).previewUsers();
   return request(`${API_BASE}/users`, { headers: getHeaders() }, { reloadOnUnauthorized: true });
 };
 
@@ -206,7 +225,11 @@ export const createUser = async (
   isAdmin: boolean,
   devices: string[],
 ): Promise<void> => {
-  if (isPreviewMode) { void password; previewCreateUser(email, isAdmin, devices); return; }
+  if (isPreviewMode) {
+    void password;
+    (await import('./previewData.ts')).previewCreateUser(email, isAdmin, devices);
+    return;
+  }
   return request(`${API_BASE}/users`, {
     method: 'POST',
     headers: getHeaders(),
@@ -215,7 +238,10 @@ export const createUser = async (
 };
 
 export const deleteUser = async (id: number): Promise<void> => {
-  if (isPreviewMode) { previewDeleteUser(id); return; }
+  if (isPreviewMode) {
+    (await import('./previewData.ts')).previewDeleteUser(id);
+    return;
+  }
   return request(`${API_BASE}/users/${id}`, {
     method: 'DELETE',
     headers: getHeaders(),
@@ -226,7 +252,10 @@ export const updateUser = async (
   id: number,
   data: { password?: string; is_admin?: boolean; devices?: string[] },
 ): Promise<void> => {
-  if (isPreviewMode) { previewUpdateUser(id, data); return; }
+  if (isPreviewMode) {
+    (await import('./previewData.ts')).previewUpdateUser(id, data);
+    return;
+  }
   return request(`${API_BASE}/users/${id}`, {
     method: 'PUT',
     headers: getHeaders(),
