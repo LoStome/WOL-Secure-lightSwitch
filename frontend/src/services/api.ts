@@ -1,7 +1,7 @@
 import type { Host, SessionUser, AdminUser } from './types';
 export type { Host, SessionUser, AdminUser } from './types';
 
-export const isPreviewMode = import.meta.env.DEV
+export const isPreviewMode = import.meta.env?.DEV
   && typeof window !== 'undefined'
   && ['1', '2', '3', '4'].includes(new URLSearchParams(window.location.search).get('preview') ?? '');
 
