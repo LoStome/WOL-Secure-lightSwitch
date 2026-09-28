@@ -1,5 +1,9 @@
 # WOL-Secure-lightSwitch (SecureSwitch)
 
+<p align="center">
+  <img src="frontend/public/logo.svg" alt="SecureSwitch logo" width="88" />
+</p>
+
 SecureSwitch is a lightweight web application for managing devices on a local network. It combines Wake-on-LAN (WOL), availability monitoring and optional remote shutdown in one browser interface.
 
 The backend is written in Go and the frontend in React. The application is designed for a Docker deployment behind an HTTPS reverse proxy, with role-based access control so administrators can decide which devices each user may control.
@@ -14,6 +18,8 @@ The backend is written in Go and the frontend in React. The application is desig
 - **Docker deployment:** the application, database and configuration are kept in a persistent Docker volume.
 
 ## Screenshots
+
+The screenshots below use illustrative data from the local preview.
 
 ### Administrator dashboard
 
