@@ -19,7 +19,7 @@ The backend is written in Go and the frontend in React. The application is desig
 
 ## Screenshots
 
-The screenshots below use illustrative data from the local preview.
+The screenshots below use fictional example data.
 
 ### Administrator dashboard
 
