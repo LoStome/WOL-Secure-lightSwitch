@@ -77,6 +77,7 @@ func (a *App) Router(trustedProxies []string) (*gin.Engine, error) {
 
 	if _, err := os.Stat(frontendPath + "/index.html"); err == nil {
 		r.Static("/assets", frontendPath+"/assets")
+		r.StaticFile("/logo.svg", frontendPath+"/logo.svg")
 		r.StaticFile("/power.svg", frontendPath+"/power.svg")
 		r.LoadHTMLGlob(frontendPath + "/index.html")
 
