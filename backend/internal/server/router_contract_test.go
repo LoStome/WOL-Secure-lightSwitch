@@ -92,7 +92,9 @@ func TestRouterPreservesRoutesAndDeviceResponses(t *testing.T) {
 		"GET /api/hosts": false, "POST /api/wol/:id": false, "POST /api/shutdown/:id": false,
 		"GET /api/users": false, "POST /api/users": false, "PUT /api/users/:id": false,
 		"DELETE /api/users/:id": false, "GET /api/metrics/login": false,
-		"GET /logo.svg": false, "GET /power.svg": false,
+		"GET /assets/*filepath": false, "HEAD /assets/*filepath": false,
+		"GET /logo.svg": false, "HEAD /logo.svg": false,
+		"GET /power.svg": false, "HEAD /power.svg": false,
 	}
 	for _, route := range router.Routes() {
 		key := route.Method + " " + route.Path
