@@ -1,17 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Lock, Mail, KeyRound, Loader2, Zap, UserPlus } from 'lucide-react';
-import { login, checkSetup } from '../services/api';
+import { useEffect, useState, type FormEvent } from 'react';
+import { checkSetup, login } from '../services/api';
 import type { SessionUser } from '../services/types';
 import { getErrorMessage } from '../utils/errorMessage';
 
-const minimumPasswordLength = 12;
-const maximumPasswordLength = 72;
+interface LoginProps { onLoginSuccess: (user: SessionUser) => void }
 
-interface LoginProps {
-  onLoginSuccess: (user: SessionUser) => void;
-}
-
-const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
+const Login = ({ onLoginSuccess }: LoginProps) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -19,118 +13,44 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [isSetupState, setIsSetupState] = useState(false);
 
   useEffect(() => {
-    const fetchSetupStatus = async () => {
-      try {
-        const status = await checkSetup();
-        setIsSetupState(status.needs_setup);
-      } catch (err) {
-        console.error("Failed to check setup status", err);
-      }
-    };
-    fetchSetupStatus();
+    let cancelled = false;
+    void checkSetup().then(status => { if (!cancelled) setIsSetupState(status.needs_setup); }).catch(err => console.error('Failed to check setup status', err));
+    return () => { cancelled = true; };
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
     setError('');
     setLoading(true);
-
     try {
       const data = await login(email, password);
       onLoginSuccess(data.user);
     } catch (err: unknown) {
-      setError(getErrorMessage(err) || 'Login failed. Please check your credentials.');
+      setError(getErrorMessage(err) || 'Sign in failed. Check your details and try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh]">
-      <div className="w-full max-w-sm p-8 bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl shadow-2xl">
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="bg-blue-500/10 p-2.5 rounded-xl ring-1 ring-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.15)]">
-            <Zap className="w-6 h-6 text-blue-400" />
-          </div>
-          <h2 className="text-2xl font-bold tracking-tight text-zinc-100">
-            {isSetupState ? 'Setup Admin' : 'Sign In'}
-          </h2>
-        </div>
-
-        {isSetupState && (
-          <div className="mb-6 p-3 text-sm text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-xl text-center">
-            Welcome! Please configure your first administrator account to get started.
-          </div>
-        )}
-
-        {error && (
-          <div role="alert" className="mb-6 p-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-2">
-            <label htmlFor="login-email" className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">Email</label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                <Mail className="h-4 w-4 text-zinc-500" />
-              </div>
-              <input
-                id="login-email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                maxLength={254}
-                className="w-full pl-10 pr-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
-                placeholder="admin@example.com"
-              />
-            </div>
-            <p className="text-xs text-zinc-500 ml-1">Use a valid email address, up to 254 bytes.</p>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="login-password" className="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">Password</label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                <KeyRound className="h-4 w-4 text-zinc-500" />
-              </div>
-              <input
-                id="login-password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={isSetupState ? minimumPasswordLength : undefined}
-                maxLength={maximumPasswordLength}
-                className="w-full pl-10 pr-4 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
-                placeholder="••••••••"
-              />
-            </div>
-            <p className="text-xs text-zinc-500 ml-1">
-              {isSetupState ? 'Use at least 12 characters and at most 72 bytes.' : 'Passwords are case-sensitive.'}
-            </p>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed mt-4"
-          >
-            {loading ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <>
-                {isSetupState ? <UserPlus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
-                {isSetupState ? 'Create Account' : 'Sign In'}
-              </>
-            )}
-          </button>
-        </form>
-      </div>
+  return <div className="login-layout content-wrap">
+    <div className="login-intro">{isSetupState && <p className="eyebrow">FIRST-TIME SETUP</p>}
+      <h1>{isSetupState ? <>Make this space<br />yours.</> : <>Your devices,<br />within reach.</>}</h1>
+      <p>{isSetupState ? 'Create the first administrator account to start managing your devices.' : 'Check availability, wake a device, or send a shutdown command from one clear place.'}</p>
+      {isSetupState && <div className="setup-note"><strong>Your first account is an administrator</strong><span>You can add other users after signing in.</span></div>}
     </div>
-  );
+    <div className="panel login-panel"><p className="eyebrow">{isSetupState ? 'GET STARTED' : 'WELCOME BACK'}</p>
+      <h2>{isSetupState ? 'Create your account' : 'Sign in'}</h2>
+      <p className="panel-description">{isSetupState ? 'Set up secure access for this installation.' : 'Use your account to manage your devices.'}</p>
+      {error && <div role="alert" className="form-error">{error}</div>}
+      <form onSubmit={handleSubmit} className="user-form">
+        <div className="field"><label htmlFor="login-email">Email</label><input id="login-email" type="email" value={email} onChange={event => setEmail(event.target.value)} required maxLength={254} placeholder="name@example.com" /></div>
+        <div className="field"><label htmlFor="login-password">Password</label><input id="login-password" type="password" value={password} onChange={event => setPassword(event.target.value)} required minLength={isSetupState ? 12 : undefined} maxLength={72} placeholder={isSetupState ? 'Choose a password' : 'Enter your password'} />
+          {isSetupState && <p className="field-help">Use at least 12 characters.</p>}</div>
+        <button className="primary-button form-submit" type="submit" disabled={loading}>{loading ? 'Please wait…' : isSetupState ? 'Create account' : 'Sign in'}</button>
+      </form>
+      {!isSetupState && <p className="login-help">Having trouble? Contact your administrator.</p>}
+    </div>
+  </div>;
 };
 
 export default Login;

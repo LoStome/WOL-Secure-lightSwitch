@@ -106,23 +106,14 @@ const AdminPanel = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-      </div>
-    );
-  }
+  if (loading) return <div className="content-wrap state-panel" role="status"><Loader2 className="spin" size={20} /> Loading users…</div>;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-10">
-      
-      {error && (
-        <div role="alert" className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl">
-          {error}
-        </div>
-      )}
-
+    <section className="content-wrap" aria-labelledby="admin-title">
+      <div className="page-heading"><div><p className="eyebrow">ACCESS CONTROL</p><h1 id="admin-title">Admin</h1><p>Manage people and the devices they can use.</p></div></div>
+      {error && <div role="alert" className="state-panel error-panel">{error}</div>}
+      <div className="admin-layout">
+      <AdminUserTable users={users} onEdit={handleEditClick} onDelete={handleDeleteUser} />
       <AdminUserForm
         editingUserId={editingUserId}
         email={email}
@@ -142,9 +133,8 @@ const AdminPanel = () => {
         onDeviceToggle={handleDeviceToggle}
       />
 
-      <AdminUserTable users={users} onEdit={handleEditClick} onDelete={handleDeleteUser} />
-
-    </div>
+      </div>
+    </section>
   );
 };
 

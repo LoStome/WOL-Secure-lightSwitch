@@ -1,56 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { CircleAlert, MonitorOff } from 'lucide-react';
 import DeviceCard from './DeviceCard';
-import { fetchHosts } from '../services/api';
-import type { Host } from '../services/api';
-import { PowerOff } from 'lucide-react'; // use an icon for empty state
+import { fetchHosts, isPreviewMode } from '../services/api';
+import type { Host } from '../services/types';
 import { startHostPolling, type HostPollingState } from './hostPolling';
 
-const DeviceList: React.FC = () => {
-  const [pollingState, setPollingState] = useState<HostPollingState<Host>>({
-    hosts: [],
-    loading: true,
-    error: null,
-  });
-
-  useEffect(() => {
-    return startHostPolling(fetchHosts, setPollingState);
-  }, []);
-
+const DeviceList = () => {
+  const [pollingState, setPollingState] = useState<HostPollingState<Host>>({ hosts: [], loading: true, error: null });
+  useEffect(() => startHostPolling(fetchHosts, setPollingState, isPreviewMode ? 1_000 : undefined), []);
   const { hosts, loading, error } = pollingState;
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center py-20">
-        <div className="w-10 h-10 border-4 border-transparent border-t-zinc-400 border-r-zinc-400 rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-500/10 text-red-500 border border-red-500/50 p-4 rounded-xl text-center max-w-2xl mx-auto">
-        <p className="font-semibold">Error</p>
-        <p className="text-sm">{error}</p>
-      </div>
-    );
-  }
-
-  if (!hosts || hosts.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-zinc-500 gap-4">
-        <PowerOff className="w-16 h-16 opacity-50" />
-        <p className="text-lg">No devices configured.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 max-w-7xl mx-auto">
-      {hosts.map((host) => (
-        <DeviceCard key={host.ID} host={host} />
-      ))}
-    </div>
-  );
+  return <section className="content-wrap" aria-labelledby="devices-title">
+    <div className="page-heading"><div><p className="eyebrow">YOUR NETWORK</p><h1 id="devices-title">Devices</h1><p>Check availability and send power commands to your devices.</p></div>
+      {!loading && !error && <span className="count-label">{hosts.length} {hosts.length === 1 ? 'device' : 'devices'}</span>}</div>
+    {loading ? <div className="state-panel" role="status">Loading devices…</div>
+      : error ? <div className="state-panel error-panel" role="alert"><CircleAlert size={20} aria-hidden="true" /><div><strong>Couldn’t load devices</strong><p>{error}</p></div></div>
+        : hosts.length === 0 ? <div className="state-panel empty-panel"><MonitorOff size={26} aria-hidden="true" /><strong>No devices available</strong><p>Ask your administrator to configure a device or grant you access.</p></div>
+          : <div className="device-list">{hosts.map(host => <DeviceCard key={host.ID} host={host} />)}</div>}
+  </section>;
 };
 
 export default DeviceList;
