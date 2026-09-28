@@ -19,8 +19,6 @@ The backend is written in Go and the frontend in React. The application is desig
 
 ## Screenshots
 
-The screenshots below use fictional example data.
-
 ### Administrator dashboard
 
 The administrator dashboard shows the configured devices and their current availability.
