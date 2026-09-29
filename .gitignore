@@ -23,7 +23,16 @@ go.work.sum
 
 #config file with sensitive data, should not be tracked
 data/hosts.yaml
+data/jwt_secret
 
 frontend/node_modules
 data/secure-switch.db
 data/secure-switch.db.bak
+<<<<<<< HEAD
+
+# Environment files may contain secrets; keep the example template versioned.
+.env
+.env.*
+!.env.example
+=======
+>>>>>>> origin/main

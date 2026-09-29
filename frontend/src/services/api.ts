@@ -1,122 +1,264 @@
-export interface Host {
-  ID: string;
-  Name: string;
-  MAC: string;
-  IP: string;
-  online: boolean;
-  last_pinged: string;
+import type { Host, SessionUser, AdminUser } from './types';
+export type { Host, SessionUser, AdminUser } from './types';
+
+export const isPreviewMode = import.meta.env?.DEV
+  && typeof window !== 'undefined'
+  && ['1', '2', '3', '4'].includes(new URLSearchParams(window.location.search).get('preview') ?? '');
+
+export type ApiErrorKind = 'http' | 'network' | 'timeout' | 'invalid-response';
+
+export class ApiError extends Error {
+  readonly kind: ApiErrorKind;
+  readonly status?: number;
+  readonly requestId?: string;
+
+  constructor(
+    message: string,
+    kind: ApiErrorKind,
+    status?: number,
+    requestId?: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.kind = kind;
+    this.status = status;
+    this.requestId = requestId;
+  }
 }
 
-export interface User {
-  id: number;
-  email: string;
-  is_admin: boolean;
-  devices: { id: number, user_id: number, device_id: string }[];
+const API_BASE = '/api';
+const REQUEST_TIMEOUT_MS = 60_000;
+
+const getHeaders = () => ({
+  'Content-Type': 'application/json',
+});
+
+interface ApiErrorDetails {
+  message?: string;
+  requestId?: string;
 }
 
-const API_BASE = "/api";
+interface RequestOptions {
+  parseJson?: boolean;
+  allowUnauthorized?: boolean;
+  reloadOnUnauthorized?: boolean;
+}
 
-const getHeaders = () => {
-  const token = localStorage.getItem("token");
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { "Authorization": `Bearer ${token}` } : {})
+const getStatusMessage = (status: number): string => {
+  if (status === 401) return 'Authentication failed. Please sign in again.';
+  if (status === 403) return 'You are not authorized to perform this action.';
+  if (status === 409) return 'The request conflicts with the current server state.';
+  if (status >= 500) return 'The server could not complete the request.';
+  if (status >= 400) return `The request was rejected (HTTP ${status}).`;
+  return `The request failed (HTTP ${status}).`;
+};
+
+const readErrorDetails = async (response: Response): Promise<ApiErrorDetails> => {
+  try {
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null) return {};
+
+    const record = body as Record<string, unknown>;
+    const message = typeof record.error === 'string' && record.error.trim()
+      ? record.error
+      : typeof record.message === 'string' && record.message.trim()
+        ? record.message
+        : undefined;
+    const requestId = typeof record.request_id === 'string' && record.request_id.trim()
+      ? record.request_id
+      : undefined;
+
+    return { message, requestId };
+  } catch {
+    return {};
+  }
+};
+
+const createApiError = async (response: Response): Promise<ApiError> => {
+  const details = await readErrorDetails(response);
+  const message = details.message ?? getStatusMessage(response.status);
+  const messageWithRequestId = details.requestId
+    ? `${message} (Request ID: ${details.requestId})`
+    : message;
+
+  return new ApiError(messageWithRequestId, 'http', response.status, details.requestId);
+};
+
+const request = async <T>(
+  path: string,
+  init: RequestInit = {},
+  options: RequestOptions = {},
+): Promise<T> => {
+  if (isPreviewMode) {
+    throw new ApiError('Network requests are disabled in the local preview.', 'network');
+  }
+  const timeoutController = new AbortController();
+  const callerSignal = init.signal;
+  let timedOut = false;
+  const abortForTimeout = () => {
+    timedOut = true;
+    timeoutController.abort();
   };
-};
+  const abortForCaller = () => timeoutController.abort();
+  const timeout = globalThis.setTimeout(abortForTimeout, REQUEST_TIMEOUT_MS);
 
-const handleAuthError = (response: Response) => {
-  if (response.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    window.location.reload();
+  if (callerSignal?.aborted) {
+    abortForCaller();
+  } else {
+    callerSignal?.addEventListener('abort', abortForCaller, { once: true });
+  }
+
+  try {
+    const response = await fetch(path, { ...init, signal: timeoutController.signal });
+    if (!response.ok) {
+      if (options.allowUnauthorized && response.status === 401) return undefined as T;
+
+      const error = await createApiError(response);
+      if (timedOut) {
+        throw new ApiError('The request timed out. Please try again.', 'timeout');
+      }
+      if (options.reloadOnUnauthorized && response.status === 401) {
+        window.location.reload();
+      }
+      throw error;
+    }
+
+    if (options.parseJson === false) return undefined as T;
+
+    try {
+      return await response.json() as T;
+    } catch {
+      if (timedOut) {
+        throw new ApiError('The request timed out. Please try again.', 'timeout');
+      }
+      throw new ApiError('The server returned an invalid response.', 'invalid-response', response.status);
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (callerSignal?.aborted) throw error;
+    if (timedOut) {
+      throw new ApiError('The request timed out. Please try again.', 'timeout');
+    }
+    throw new ApiError('Unable to reach the server. Check your connection and try again.', 'network');
+  } finally {
+    globalThis.clearTimeout(timeout);
+    callerSignal?.removeEventListener('abort', abortForCaller);
   }
 };
 
-export const login = async (email: string, password: string): Promise<{token: string, user: User}> => {
-  const response = await fetch(`${API_BASE}/login`, {
+export const login = async (email: string, password: string): Promise<{ user: SessionUser }> => {
+  if (isPreviewMode) {
+    void email;
+    void password;
+    const { currentPreviewUser } = await import('./previewData.ts');
+    return { user: currentPreviewUser };
+  }
+  return request(`${API_BASE}/login`, {
     method: 'POST',
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
   });
-  if (!response.ok) {
-    throw new Error('Invalid credentials');
-  }
-  return response.json();
-}
+};
 
-export const checkSetup = async (): Promise<{needs_setup: boolean}> => {
-  const response = await fetch(`${API_BASE}/setup`);
-  if (!response.ok) {
-    throw new Error('Failed to check setup status');
+export const getCurrentUser = async (): Promise<SessionUser | null> => {
+  if (isPreviewMode) {
+    const { currentPreviewUser, previewScenario } = await import('./previewData.ts');
+    return previewScenario === '3' ? null : currentPreviewUser;
   }
-  return response.json();
-}
+  return request(`${API_BASE}/session`);
+};
 
-export const fetchHosts = async (): Promise<Host[]> => {
-  const response = await fetch(`${API_BASE}/hosts`, { headers: getHeaders() });
-  if (!response.ok) {
-    handleAuthError(response);
-    throw new Error('Failed to fetch hosts');
+export const logout = async (): Promise<void> => {
+  if (isPreviewMode) return;
+  return request(`${API_BASE}/logout`, {
+    method: 'POST',
+    headers: getHeaders(),
+  }, { parseJson: false, allowUnauthorized: true });
+};
+
+export const checkSetup = async (): Promise<{ needs_setup: boolean }> => {
+  if (isPreviewMode) {
+    const { previewScenario } = await import('./previewData.ts');
+    return { needs_setup: previewScenario === '3' };
   }
-  return response.json();
+  return request(`${API_BASE}/setup`);
+};
+
+export const fetchHosts = async (signal?: AbortSignal): Promise<Host[]> => {
+  if (isPreviewMode) {
+    void signal;
+    return (await import('./previewData.ts')).previewHosts();
+  }
+  return request(`${API_BASE}/hosts`, { headers: getHeaders(), signal }, { reloadOnUnauthorized: true });
 };
 
 export const wakeHost = async (id: string): Promise<void> => {
-  const response = await fetch(`${API_BASE}/wol/${id}`, { method: 'POST', headers: getHeaders() });
-  if (!response.ok) {
-    handleAuthError(response);
-    throw new Error('Failed to wake host');
+  if (isPreviewMode) {
+    (await import('./previewData.ts')).previewSetHostOnline(id, true);
+    return;
   }
+  return request(`${API_BASE}/wol/${id}`, {
+    method: 'POST',
+    headers: getHeaders(),
+  }, { parseJson: false, reloadOnUnauthorized: true });
 };
 
 export const shutdownHost = async (id: string): Promise<void> => {
-  const response = await fetch(`${API_BASE}/shutdown/${id}`, { method: 'POST', headers: getHeaders() });
-  if (!response.ok) {
-    handleAuthError(response);
-    throw new Error('Failed to shutdown host');
+  if (isPreviewMode) {
+    (await import('./previewData.ts')).previewSetHostOnline(id, false);
+    return;
   }
-};
-
-export const fetchUsers = async (): Promise<User[]> => {
-  const response = await fetch(`${API_BASE}/users`, { headers: getHeaders() });
-  if (!response.ok) {
-    handleAuthError(response);
-    throw new Error('Failed to fetch users');
-  }
-  return response.json();
-}
-
-export const createUser = async (email: string, password: string, isAdmin: boolean, devices: string[]): Promise<void> => {
-  const response = await fetch(`${API_BASE}/users`, {
+  return request(`${API_BASE}/shutdown/${id}`, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ email, password, is_admin: isAdmin, devices })
-  });
-  if (!response.ok) {
-    handleAuthError(response);
-    throw new Error('Failed to create user');
+  }, { parseJson: false, reloadOnUnauthorized: true });
+};
+
+export const fetchUsers = async (): Promise<AdminUser[]> => {
+  if (isPreviewMode) return (await import('./previewData.ts')).previewUsers();
+  return request(`${API_BASE}/users`, { headers: getHeaders() }, { reloadOnUnauthorized: true });
+};
+
+export const createUser = async (
+  email: string,
+  password: string,
+  isAdmin: boolean,
+  devices: string[],
+): Promise<void> => {
+  if (isPreviewMode) {
+    void password;
+    (await import('./previewData.ts')).previewCreateUser(email, isAdmin, devices);
+    return;
   }
-}
+  return request(`${API_BASE}/users`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ email, password, is_admin: isAdmin, devices }),
+  }, { parseJson: false, reloadOnUnauthorized: true });
+};
 
 export const deleteUser = async (id: number): Promise<void> => {
-  const response = await fetch(`${API_BASE}/users/${id}`, {
-    method: 'DELETE',
-    headers: getHeaders()
-  });
-  if (!response.ok) {
-    handleAuthError(response);
-    throw new Error('Failed to delete user');
+  if (isPreviewMode) {
+    (await import('./previewData.ts')).previewDeleteUser(id);
+    return;
   }
-}
+  return request(`${API_BASE}/users/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  }, { parseJson: false, reloadOnUnauthorized: true });
+};
 
-export const updateUser = async (id: number, data: { password?: string, is_admin?: boolean, devices?: string[] }): Promise<void> => {
-  const response = await fetch(`${API_BASE}/users/${id}`, {
+export const updateUser = async (
+  id: number,
+  data: { password?: string; is_admin?: boolean; devices?: string[] },
+): Promise<void> => {
+  if (isPreviewMode) {
+    (await import('./previewData.ts')).previewUpdateUser(id, data);
+    return;
+  }
+  return request(`${API_BASE}/users/${id}`, {
     method: 'PUT',
     headers: getHeaders(),
-    body: JSON.stringify(data)
-  });
-  if (!response.ok) {
-    handleAuthError(response);
-    throw new Error('Failed to update user');
-  }
-}
+    body: JSON.stringify(data),
+  }, { parseJson: false, reloadOnUnauthorized: true });
+};

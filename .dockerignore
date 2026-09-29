@@ -1,0 +1,35 @@
+# Version control and local tooling
+.git
+.git/**
+.codex
+.codex/**
+.agents
+.agents/**
+.vscode
+.vscode/**
+.idea
+.idea/**
+docs/
+
+# Runtime data, secrets, and backups
+data/
+*.db
+*.db-*
+*.bak
+*.backup
+*.key
+*.pem
+.env
+.env.*
+
+# Local dependencies and build artifacts
+frontend/node_modules/
+frontend/dist/
+backend/*.exe
+backend/*.test
+*.out
+*.log
+*.tmp
+*.temp
+Thumbs.db
+.DS_Store
